@@ -592,8 +592,12 @@ void Application::on_error(const std::exception& error) {
 Application::ManagedThread::ManagedThread(std::string name, ThreadFunction func)
     : name_(std::move(name))
     , user_function_(std::move(func))
+    , messaging_context_(std::make_shared<ThreadMessagingContext>(name_))
 {
     Logger::debug("Creating managed thread: {}", name_);
+
+    // Register with messaging bus
+    MessagingBus::instance().register_thread(name_, messaging_context_);
 
     // Create work guard to keep IO context alive
     work_guard_ = std::make_unique<asio::executor_work_guard<asio::io_context::executor_type>>(
@@ -603,7 +607,7 @@ Application::ManagedThread::ManagedThread(std::string name, ThreadFunction func)
     running_.store(true);
     thread_ = std::thread([this]() { run(); });
 
-    Logger::debug("Managed thread '{}' started", name_);
+    Logger::info("Created managed thread: {}", name_);
 }
 
 Application::ManagedThread::~ManagedThread() {
@@ -612,6 +616,10 @@ Application::ManagedThread::~ManagedThread() {
         stop();
         join();
     }
+
+    // Unregister from messaging bus
+    MessagingBus::instance().unregister_thread(name_);
+
     Logger::debug("Managed thread '{}' destroyed", name_);
 }
 
@@ -619,6 +627,12 @@ void Application::ManagedThread::run() {
     Logger::trace("Managed thread '{}' event loop starting", name_);
 
     try {
+        // Set up periodic message processing
+        if (messaging_context_) {
+            message_timer_ = std::make_shared<asio::steady_timer>(io_context_);
+            schedule_message_processing();
+        }
+
         // Call user function with the IO context
         if (user_function_) {
             user_function_(io_context_);
@@ -633,6 +647,23 @@ void Application::ManagedThread::run() {
 
     running_.store(false);
     Logger::trace("Managed thread '{}' event loop stopped", name_);
+}
+
+void Application::ManagedThread::schedule_message_processing() {
+    if (!running_.load() || !messaging_context_ || !message_timer_) {
+        return;
+    }
+
+    // Process messages
+    messaging_context_->process_messages();
+
+    // Schedule next processing
+    message_timer_->expires_after(std::chrono::milliseconds(10));
+    message_timer_->async_wait([this](const asio::error_code& ec) {
+        if (!ec && running_.load()) {
+            schedule_message_processing();
+        }
+    });
 }
 
 void Application::ManagedThread::post_task(std::function<void()> task) {

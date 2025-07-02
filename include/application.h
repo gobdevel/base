@@ -11,6 +11,7 @@
 #include "logger.h"
 #include "config.h"
 #include "singleton.h"
+#include "messaging.h"
 
 #include <asio.hpp>
 #include <asio/signal_set.hpp>
@@ -331,6 +332,44 @@ public:
         void post_task(std::function<void()> task);
 
         /**
+         * @brief Send a typed message to this thread
+         */
+        template<MessageType T>
+        bool send_message(T data, MessagePriority priority = MessagePriority::Normal) {
+            if (!messaging_context_) {
+                return false;
+            }
+            return messaging_context_->send_message(std::move(data), priority);
+        }
+
+        /**
+         * @brief Subscribe to messages of a specific type
+         */
+        template<MessageType T>
+        void subscribe_to_messages(MessageHandler<T> handler) {
+            if (messaging_context_) {
+                messaging_context_->subscribe<T>(std::move(handler));
+            }
+        }
+
+        /**
+         * @brief Unsubscribe from messages of a specific type
+         */
+        template<MessageType T>
+        void unsubscribe_from_messages() {
+            if (messaging_context_) {
+                messaging_context_->unsubscribe<T>();
+            }
+        }
+
+        /**
+         * @brief Get pending message count
+         */
+        std::size_t pending_message_count() const {
+            return messaging_context_ ? messaging_context_->pending_message_count() : 0;
+        }
+
+        /**
          * @brief Stop the thread gracefully
          */
         void stop();
@@ -342,6 +381,7 @@ public:
 
     private:
         void run();
+        void schedule_message_processing();
 
         std::string name_;
         asio::io_context io_context_;
@@ -349,6 +389,8 @@ public:
         std::thread thread_;
         std::atomic<bool> running_{false};
         ThreadFunction user_function_;
+        std::shared_ptr<ThreadMessagingContext> messaging_context_;
+        std::shared_ptr<asio::steady_timer> message_timer_;
     };
 
     /**
@@ -388,6 +430,38 @@ public:
      * @return Pointer to thread or nullptr if not found
      */
     ManagedThread* get_managed_thread(const std::string& name) const;
+
+    // ============================================================================
+    // Messaging API
+    // ============================================================================
+
+    /**
+     * @brief Send message to a specific thread
+     * @param target_thread Target thread name
+     * @param data Message data
+     * @param priority Message priority
+     * @return true if message was sent successfully
+     */
+    template<MessageType T>
+    bool send_message_to_thread(const std::string& target_thread, T data,
+                               MessagePriority priority = MessagePriority::Normal) {
+        return MessagingBus::instance().send_to_thread(target_thread, std::move(data), priority);
+    }
+
+    /**
+     * @brief Broadcast message to all managed threads
+     * @param data Message data
+     * @param priority Message priority
+     */
+    template<MessageType T>
+    void broadcast_message(T data, MessagePriority priority = MessagePriority::Normal) {
+        MessagingBus::instance().broadcast(std::move(data), priority);
+    }
+
+    /**
+     * @brief Get messaging bus instance
+     */
+    MessagingBus& messaging_bus() { return MessagingBus::instance(); }
 
 protected:
     /**

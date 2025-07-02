@@ -14,24 +14,12 @@ add_library(crux
     src/logger.cpp
     src/config.cpp
     src/application.cpp
+    src/messaging.cpp
 )
 target_include_directories(crux PUBLIC include)
 
-# Config example executable
-add_executable(config_example src/config_example.cpp)
-target_link_libraries(config_example crux)
-
-# Color test executable
-add_executable(color_test src/color_test.cpp)
-target_link_libraries(color_test crux)
-
-# Logger configuration demo executable
-add_executable(logger_config_demo src/logger_config_demo.cpp)
-target_link_libraries(logger_config_demo crux)
-
-# Application framework example
-add_executable(app_example src/app_example.cpp)
-target_link_libraries(app_example crux)
+# Add examples subdirectory
+add_subdirectory(examples)
 
 if (NOT BUILD_TESTING STREQUAL OFF)
     add_subdirectory(tests)
@@ -43,5 +31,5 @@ target_link_libraries(crux
     asio::asio
 )
 
-set_target_properties(crux PROPERTIES PUBLIC_HEADER "include/logger.h;include/config.h;include/singleton.h;include/application.h")
+set_target_properties(crux PROPERTIES PUBLIC_HEADER "include/logger.h;include/config.h;include/singleton.h;include/application.h;include/messaging.h")
 install(TARGETS crux)

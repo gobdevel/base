@@ -378,6 +378,238 @@ TEST_F(ApplicationFrameworkTest, DocumentationComplete) {
     EXPECT_TRUE(true);
 }
 
+TEST_F(ApplicationFrameworkTest, ThreadMessaging) {
+    ApplicationConfig config;
+    config.worker_threads = 1;
+    config.use_dedicated_io_thread = false;
+    config.enable_health_check = false;
+
+    Application app(config);
+
+    // Test message types
+    struct TestMessage {
+        int id;
+        std::string data;
+        TestMessage(int i, std::string d) : id(i), data(std::move(d)) {}
+    };
+
+    // Create threads
+    auto thread1 = app.create_worker_thread("msg-thread-1");
+    auto thread2 = app.create_worker_thread("msg-thread-2");
+
+    std::atomic<int> thread1_messages{0};
+    std::atomic<int> thread2_messages{0};
+    std::atomic<int> last_message_id{0};
+
+    // Set up message handlers
+    thread1->subscribe_to_messages<TestMessage>([&thread1_messages, &last_message_id](const Message<TestMessage>& msg) {
+        thread1_messages++;
+        last_message_id.store(msg.data().id);
+        Logger::debug("Thread1 received message: id={}, data={}", msg.data().id, msg.data().data);
+    });
+
+    thread2->subscribe_to_messages<TestMessage>([&thread2_messages](const Message<TestMessage>& msg) {
+        thread2_messages++;
+        Logger::debug("Thread2 received message: id={}, data={}", msg.data().id, msg.data().data);
+    });
+
+    // Test direct thread messaging
+    EXPECT_TRUE(thread1->send_message(TestMessage{1, "direct_to_thread1"}));
+    EXPECT_TRUE(thread2->send_message(TestMessage{2, "direct_to_thread2"}));
+
+    // Test application-level messaging
+    EXPECT_TRUE(app.send_message_to_thread("msg-thread-1", TestMessage{3, "app_to_thread1"}));
+    EXPECT_TRUE(app.send_message_to_thread("msg-thread-2", TestMessage{4, "app_to_thread2"}));
+
+    // Test broadcast messaging
+    app.broadcast_message(TestMessage{5, "broadcast_message"});
+
+    // Give threads time to process messages
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // Verify message counts
+    EXPECT_EQ(thread1_messages.load(), 3); // direct + app_direct + broadcast
+    EXPECT_EQ(thread2_messages.load(), 3); // direct + app_direct + broadcast
+
+    // Test pending message count
+    thread1->send_message(TestMessage{6, "pending"});
+    EXPECT_GT(thread1->pending_message_count(), 0);
+
+    // Clean up
+    thread1->stop();
+    thread1->join();
+    thread2->stop();
+    thread2->join();
+}
+
+TEST_F(ApplicationFrameworkTest, MessagePriority) {
+    ApplicationConfig config;
+    config.worker_threads = 1;
+    config.use_dedicated_io_thread = false;
+    config.enable_health_check = false;
+
+    Application app(config);
+
+    struct PriorityMessage {
+        int value;
+        MessagePriority priority;
+        PriorityMessage(int v, MessagePriority p) : value(v), priority(p) {}
+    };
+
+    auto thread = app.create_worker_thread("priority-test");
+
+    std::vector<int> received_order;
+    std::mutex order_mutex;
+
+    thread->subscribe_to_messages<PriorityMessage>([&received_order, &order_mutex](const Message<PriorityMessage>& msg) {
+        std::lock_guard<std::mutex> lock(order_mutex);
+        received_order.push_back(msg.data().value);
+        Logger::debug("Received priority message: value={}, priority={}",
+                     msg.data().value, static_cast<int>(msg.priority()));
+    });
+
+    // Send messages in non-priority order
+    thread->send_message(PriorityMessage{1, MessagePriority::Low}, MessagePriority::Low);
+    thread->send_message(PriorityMessage{2, MessagePriority::Critical}, MessagePriority::Critical);
+    thread->send_message(PriorityMessage{3, MessagePriority::Normal}, MessagePriority::Normal);
+    thread->send_message(PriorityMessage{4, MessagePriority::High}, MessagePriority::High);
+
+    // Give thread time to process in priority order
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // Should receive in priority order: Critical, High, Normal, Low
+    std::vector<int> expected_order = {2, 4, 3, 1};
+
+    std::lock_guard<std::mutex> lock(order_mutex);
+    EXPECT_EQ(received_order, expected_order);
+
+    // Clean up
+    thread->stop();
+    thread->join();
+}
+
+TEST_F(ApplicationFrameworkTest, CrossThreadCommunication) {
+    ApplicationConfig config;
+    config.worker_threads = 1;
+    config.use_dedicated_io_thread = false;
+    config.enable_health_check = false;
+
+    Application app(config);
+
+    struct RequestMessage {
+        int request_id;
+        std::string request_data;
+        RequestMessage(int id, std::string data) : request_id(id), request_data(std::move(data)) {}
+    };
+
+    struct ResponseMessage {
+        int request_id;
+        std::string response_data;
+        ResponseMessage(int id, std::string data) : request_id(id), response_data(std::move(data)) {}
+    };
+
+    auto client_thread = app.create_worker_thread("client");
+    auto server_thread = app.create_worker_thread("server");
+
+    std::atomic<int> requests_processed{0};
+    std::atomic<int> responses_received{0};
+
+    // Server: Handle requests and send responses
+    server_thread->subscribe_to_messages<RequestMessage>([&app, &requests_processed](const Message<RequestMessage>& msg) {
+        requests_processed++;
+        Logger::debug("Server processing request: id={}, data={}",
+                     msg.data().request_id, msg.data().request_data);
+
+        // Send response back to client
+        std::string response_data = "Response to " + msg.data().request_data;
+        app.send_message_to_thread("client", ResponseMessage{msg.data().request_id, response_data});
+    });
+
+    // Client: Handle responses
+    client_thread->subscribe_to_messages<ResponseMessage>([&responses_received](const Message<ResponseMessage>& msg) {
+        responses_received++;
+        Logger::debug("Client received response: id={}, data={}",
+                     msg.data().request_id, msg.data().response_data);
+    });
+
+    // Send requests from client to server
+    app.send_message_to_thread("server", RequestMessage{1, "Request 1"});
+    app.send_message_to_thread("server", RequestMessage{2, "Request 2"});
+    app.send_message_to_thread("server", RequestMessage{3, "Request 3"});
+
+    // Give threads time to process request-response cycle
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    EXPECT_EQ(requests_processed.load(), 3);
+    EXPECT_EQ(responses_received.load(), 3);
+
+    // Clean up
+    client_thread->stop();
+    client_thread->join();
+    server_thread->stop();
+    server_thread->join();
+}
+
+TEST_F(ApplicationFrameworkTest, MessagingPerformance) {
+    ApplicationConfig config;
+    config.worker_threads = 1;
+    config.use_dedicated_io_thread = false;
+    config.enable_health_check = false;
+
+    Application app(config);
+
+    struct PerformanceMessage {
+        int sequence;
+        std::chrono::steady_clock::time_point timestamp;
+        PerformanceMessage(int seq) : sequence(seq), timestamp(std::chrono::steady_clock::now()) {}
+    };
+
+    auto thread = app.create_worker_thread("performance-test");
+
+    std::atomic<int> messages_processed{0};
+    auto start_time = std::chrono::steady_clock::now();
+
+    thread->subscribe_to_messages<PerformanceMessage>([&messages_processed, start_time](const Message<PerformanceMessage>& msg) {
+        messages_processed++;
+
+        if (msg.data().sequence % 100 == 0) {
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time);
+            Logger::debug("Processed {} messages in {}ms", msg.data().sequence, elapsed.count());
+        }
+    });
+
+    // Send many messages rapidly
+    const int message_count = 1000;
+    auto send_start = std::chrono::high_resolution_clock::now();
+
+    for (int i = 1; i <= message_count; ++i) {
+        thread->send_message(PerformanceMessage{i});
+    }
+
+    auto send_end = std::chrono::high_resolution_clock::now();
+    auto send_duration = std::chrono::duration_cast<std::chrono::microseconds>(send_end - send_start);
+
+    // Wait for all messages to be processed
+    auto timeout = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (messages_processed.load() < message_count && std::chrono::steady_clock::now() < timeout) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    auto process_end = std::chrono::steady_clock::now();
+    auto total_duration = std::chrono::duration_cast<std::chrono::milliseconds>(process_end - send_start);
+
+    Logger::info("Messaging performance: {} messages sent in {}μs, processed in {}ms",
+                message_count, send_duration.count(), total_duration.count());
+
+    EXPECT_EQ(messages_processed.load(), message_count);
+    EXPECT_LT(total_duration.count(), 1000); // Should process 1000 messages in under 1 second
+
+    // Clean up
+    thread->stop();
+    thread->join();
+}
+
 /*
  * Framework Implementation Notes:
  *

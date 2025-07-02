@@ -263,8 +263,8 @@ int main() {
         std::cout << "- logs/advanced_demo.log" << std::endl;
         std::cout << "- logs/config_demo.log" << std::endl;
         std::cout << "\nFor more information, see:" << std::endl;
-        std::cout << "- LOGGER_README.md for detailed logger documentation" << std::endl;
-        std::cout << "- CONFIG_README.md for configuration system documentation" << std::endl;
+        std::cout << "- docs/LOGGER_README.md for detailed logger documentation" << std::endl;
+        std::cout << "- docs/CONFIG_README.md for configuration system documentation" << std::endl;
 
     } catch (const std::exception& e) {
         Logger::critical("Demo failed with exception: {}", e.what());

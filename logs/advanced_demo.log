@@ -1,0 +1,9 @@
+[23:02:15.645] [AdvancedDemo] [   trace] [logger.h:109] Trace level message with source location
+[23:02:15.645] [AdvancedDemo] [   debug] [logger.h:121] Debug message with file and line info
+[23:02:15.645] [AdvancedDemo] [    info] [logger.h:133] Info message goes to both console and file
+[23:02:15.645] [AdvancedDemo] [ warning] [logger.h:145] Warning message with timestamp
+[23:02:15.645] [AdvancedDemo] [   error] [logger.h:157] Error message with full context
+[23:02:15.645] [AdvancedDemo] [    info] [logger.h:133] User login: name=john_doe, id=12345, timestamp=1751436135
+[23:02:15.645] [AdvancedDemo] [ warning] [logger.h:145] High CPU usage detected: 67.5%
+[23:02:15.645] [AdvancedDemo] [   debug] [logger.h:121] Processing request for user john_doe (ID: 12345)
+[23:02:15.645] [AdvancedDemo] [    info] [logger.h:133] Loaded configuration for app 'logger_demo' from string
