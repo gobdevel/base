@@ -21,8 +21,24 @@ target_link_libraries(app_example crux)
 add_executable(messaging_example messaging_example.cpp)
 target_link_libraries(messaging_example crux)
 
+# CLI example - demonstrates runtime inspection and debugging CLI
+add_executable(cli_example cli_example.cpp)
+target_link_libraries(cli_example crux)
+
+# CLI comprehensive test - consolidated test suite for all CLI functionality
+add_executable(cli_comprehensive_test cli_comprehensive_test.cpp)
+target_link_libraries(cli_comprehensive_test crux)
+
+# Minimal test - basic application framework test without CLI
+add_executable(minimal_test minimal_test.cpp)
+target_link_libraries(minimal_test crux)
+
+# Simple performance test - demonstrates performance measurement
+add_executable(simple_performance_test simple_performance_test.cpp)
+target_link_libraries(simple_performance_test crux)
+
 # Set output directory for examples
-set_target_properties(config_example color_test logger_config_demo app_example messaging_example
+set_target_properties(config_example color_test logger_config_demo app_example messaging_example cli_example cli_comprehensive_test minimal_test simple_performance_test
     PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
 )

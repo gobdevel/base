@@ -110,6 +110,59 @@ Comprehensive messaging system demonstration:
 ./build/Release/examples/messaging_example
 ```
 
+### 6. cli_example
+
+**File**: `cli_example.cpp`
+
+Runtime inspection and debugging CLI demonstration:
+
+- Interactive command-line interface
+- Real-time application monitoring
+- Custom command registration
+- TCP and stdin interfaces
+- Application state inspection
+
+**Features Demonstrated**:
+
+- Built-in commands (status, threads, config, health, etc.)
+- Custom application-specific commands
+- Runtime task counter monitoring
+- Worker thread control
+- Load simulation and monitoring
+- Remote access via TCP
+
+**Usage**:
+
+```bash
+# Run the application
+./build/Release/examples/cli_example
+
+# In the same terminal, you can type commands:
+> help
+> status
+> threads
+> task-count
+> load 100
+
+# Or connect remotely (if TCP enabled):
+telnet localhost 8080
+```
+
+**Available CLI Commands**:
+
+- `help` - Show all available commands
+- `status` - Application status and info
+- `threads` - Thread information
+- `config` - Configuration display
+- `health` - Health check results
+- `messaging` - Messaging statistics
+- `log-level` - Change log verbosity
+- `task-count` - Show task counter (custom)
+- `worker` - Control worker thread (custom)
+- `load <n>` - Simulate load with n tasks (custom)
+- `shutdown` - Graceful application shutdown
+- `exit` - Exit CLI (app continues)
+
 ## Example Output
 
 The messaging example produces output like this:
@@ -142,6 +195,7 @@ Recommended order for exploring the examples:
 3. **logger_config_demo** - Advanced logging setup
 4. **app_example** - Basic application framework
 5. **messaging_example** - Advanced inter-thread messaging
+6. **cli_example** - Runtime inspection and debugging
 
 ## Integration Examples
 

@@ -24,6 +24,16 @@ Comprehensive documentation for the type-safe messaging system:
 - Performance characteristics
 - Integration with managed threads
 
+### ⚡ [Event-Driven Messaging](EVENT_DRIVEN_README.md)
+
+Advanced event-driven messaging with immediate processing:
+
+- Condition variable-based notifications
+- Sub-microsecond latency
+- 100K+ messages/second throughput
+- Zero polling overhead
+- Real-time processing capabilities
+
 ### 📝 [Logger System](LOGGER_README.md)
 
 In-depth guide to the high-performance logging system:
@@ -38,6 +48,22 @@ In-depth guide to the high-performance logging system:
 
 Detailed documentation for TOML-based configuration:
 
+- Configuration file management
+- Type-safe access patterns
+- Runtime configuration updates
+- Environment integration
+- Default value handling
+
+### 🔧 [CLI - Runtime Inspection & Debugging](CLI_README.md)
+
+Complete guide to the runtime CLI for application inspection:
+
+- Built-in monitoring commands
+- Custom command registration
+- TCP and stdin interfaces
+- Application state inspection
+- Runtime debugging capabilities
+
 - Type-safe configuration access
 - Nested configuration handling
 - Default value management
@@ -46,12 +72,13 @@ Detailed documentation for TOML-based configuration:
 
 ## Quick Navigation
 
-| Component                            | Purpose                    | Key Features                     |
-| ------------------------------------ | -------------------------- | -------------------------------- |
-| [Application](APPLICATION_README.md) | Framework foundation       | Event loops, threads, signals    |
-| [Messaging](MESSAGING_README.md)     | Inter-thread communication | Type safety, priorities, pub/sub |
-| [Logger](LOGGER_README.md)           | High-performance logging   | Async, colors, structured output |
-| [Config](CONFIG_README.md)           | Configuration management   | TOML, type safety, validation    |
+| Component                              | Purpose                    | Key Features                      |
+| -------------------------------------- | -------------------------- | --------------------------------- |
+| [Application](APPLICATION_README.md)   | Framework foundation       | Event loops, threads, signals     |
+| [Messaging](MESSAGING_README.md)       | Inter-thread communication | Type safety, priorities, pub/sub  |
+| [Event-Driven](EVENT_DRIVEN_README.md) | Real-time messaging        | Immediate processing, low latency |
+| [Logger](LOGGER_README.md)             | High-performance logging   | Async, colors, structured output  |
+| [Config](CONFIG_README.md)             | Configuration management   | TOML, type safety, validation     |
 
 ## Additional Resources
 

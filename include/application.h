@@ -29,6 +29,10 @@
 
 namespace crux {
 
+// Forward declarations
+struct CLIConfig;
+enum class ApplicationState;
+
 /**
  * @brief Application lifecycle states
  */
@@ -68,6 +72,13 @@ struct ApplicationConfig {
     // Configuration file
     std::string config_file = "app.toml";
     std::string config_app_name = "default";
+
+    // CLI configuration
+    bool enable_cli = false;
+    bool cli_enable_stdin = true;
+    bool cli_enable_tcp = false;
+    std::string cli_bind_address = "127.0.0.1";
+    std::uint16_t cli_port = 8080;
 };
 
 /**
@@ -84,6 +95,7 @@ enum class TaskPriority {
  * @brief Forward declarations
  */
 class Application;
+class CLI;
 
 /**
  * @brief Application component interface for modular components
@@ -394,6 +406,107 @@ public:
     };
 
     /**
+     * @brief Event-driven managed thread with immediate message processing
+     */
+    class EventDrivenManagedThread {
+    public:
+        using ThreadFunction = std::function<void(EventDrivenManagedThread&)>;
+
+        EventDrivenManagedThread(std::string name, ThreadFunction func = nullptr);
+        ~EventDrivenManagedThread();
+
+        // Non-copyable, non-movable
+        EventDrivenManagedThread(const EventDrivenManagedThread&) = delete;
+        EventDrivenManagedThread& operator=(const EventDrivenManagedThread&) = delete;
+        EventDrivenManagedThread(EventDrivenManagedThread&&) = delete;
+        EventDrivenManagedThread& operator=(EventDrivenManagedThread&&) = delete;
+
+        /**
+         * @brief Get the thread's IO context
+         */
+        asio::io_context& io_context() noexcept { return io_context_; }
+
+        /**
+         * @brief Get the thread's executor
+         */
+        asio::any_io_executor executor() noexcept { return io_context_.get_executor(); }
+
+        /**
+         * @brief Get thread name
+         */
+        const std::string& name() const noexcept { return name_; }
+
+        /**
+         * @brief Check if thread is running
+         */
+        bool is_running() const noexcept { return running_.load(); }
+
+        /**
+         * @brief Post a task to this thread's event loop
+         */
+        void post_task(std::function<void()> task);
+
+        /**
+         * @brief Send a typed message to this thread (immediate notification)
+         */
+        template<MessageType T>
+        bool send_message(T data, MessagePriority priority = MessagePriority::Normal) {
+            if (!messaging_context_) {
+                return false;
+            }
+            return messaging_context_->send_message(std::move(data), priority);
+        }
+
+        /**
+         * @brief Subscribe to messages of a specific type
+         */
+        template<MessageType T>
+        void subscribe_to_messages(MessageHandler<T> handler) {
+            if (messaging_context_) {
+                messaging_context_->subscribe<T>(std::move(handler));
+            }
+        }
+
+        /**
+         * @brief Unsubscribe from messages of a specific type
+         */
+        template<MessageType T>
+        void unsubscribe_from_messages() {
+            if (messaging_context_) {
+                messaging_context_->unsubscribe<T>();
+            }
+        }
+
+        /**
+         * @brief Stop the thread gracefully
+         */
+        void stop();
+
+        /**
+         * @brief Join the thread (wait for completion)
+         */
+        void join();
+
+        /**
+         * @brief Get current queue size
+         */
+        std::size_t queue_size() const {
+            return messaging_context_ ? messaging_context_->queue_size() : 0;
+        }
+
+    private:
+        void thread_main();
+
+        std::string name_;
+        ThreadFunction func_;
+        std::atomic<bool> running_{false};
+        std::thread thread_;
+        asio::io_context io_context_;
+        std::unique_ptr<asio::executor_work_guard<asio::io_context::executor_type>> work_guard_;
+        std::unique_ptr<EventDrivenThreadMessagingContext> messaging_context_;
+    };
+
+    /**
      * @brief Create and start a managed thread with its own event loop
      * @param name Thread name for logging/debugging
      * @param thread_func Function to run in the thread (receives io_context reference)
@@ -408,6 +521,13 @@ public:
      * @return Shared pointer to managed thread
      */
     std::shared_ptr<ManagedThread> create_worker_thread(std::string name);
+
+    /**
+     * @brief Create an event-driven worker thread with immediate message processing
+     * @param name Thread name for logging/debugging
+     * @return Shared pointer to event-driven managed thread
+     */
+    std::shared_ptr<EventDrivenManagedThread> create_event_driven_thread(std::string name);
 
     /**
      * @brief Get the number of managed threads
@@ -462,6 +582,36 @@ public:
      * @brief Get messaging bus instance
      */
     MessagingBus& messaging_bus() { return MessagingBus::instance(); }
+
+    // CLI Management
+
+    /**
+     * @brief Get CLI instance
+     */
+    CLI& cli() const;
+
+    /**
+     * @brief Enable CLI with configuration
+     * @param config CLI configuration
+     * @return true if CLI was started successfully
+     */
+    bool enable_cli(const CLIConfig& config);
+
+    /**
+     * @brief Enable CLI with default configuration
+     * @return true if CLI was started successfully
+     */
+    bool enable_cli();
+
+    /**
+     * @brief Disable CLI
+     */
+    void disable_cli();
+
+    /**
+     * @brief Check if CLI is enabled and running
+     */
+    bool is_cli_enabled() const;
 
 protected:
     /**
@@ -538,6 +688,9 @@ private:
     // Managed threads
     std::vector<std::shared_ptr<ManagedThread>> managed_threads_;
     mutable std::mutex managed_threads_mutex_;
+
+    // CLI management
+    bool cli_enabled_{false};
 
     // Synchronization
     mutable std::mutex components_mutex_;

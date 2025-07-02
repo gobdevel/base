@@ -7,6 +7,7 @@
  */
 
 #include "application.h"
+#include "cli.h"
 
 #include <algorithm>
 #include <csignal>
@@ -190,6 +191,21 @@ bool Application::start_internal() {
             start_health_monitoring();
         }
 
+        // Start CLI if configured via ApplicationConfig
+        if (config_.enable_cli) {
+            CLIConfig cli_config{
+                .enable = true,
+                .bind_address = config_.cli_bind_address,
+                .port = config_.cli_port,
+                .enable_stdin = config_.cli_enable_stdin,
+                .enable_tcp_server = config_.cli_enable_tcp
+            };
+
+            if (!enable_cli(cli_config)) {
+                Logger::warn("Failed to start CLI as configured, but continuing startup");
+            }
+        }
+
         Logger::info("Application startup completed");
         return true;
 
@@ -205,6 +221,9 @@ void Application::stop_internal() {
     change_state(ApplicationState::Stopping);
 
     try {
+        // Stop CLI first to prevent new commands
+        disable_cli();
+
         // Stop health monitoring
         stop_health_monitoring();
 
@@ -698,6 +717,97 @@ void Application::ManagedThread::join() {
     }
 }
 
+// Event-Driven Managed Thread Implementation
+
+Application::EventDrivenManagedThread::EventDrivenManagedThread(std::string name, ThreadFunction func)
+    : name_(std::move(name)), func_(std::move(func)) {
+
+    Logger::debug("Creating event-driven managed thread '{}'", name_);
+
+    // Create messaging context
+    messaging_context_ = std::make_unique<EventDrivenThreadMessagingContext>(name_);
+
+    // Start the thread
+    running_.store(true);
+    thread_ = std::thread([this]() { thread_main(); });
+
+    Logger::debug("Event-driven managed thread '{}' created and started", name_);
+}
+
+Application::EventDrivenManagedThread::~EventDrivenManagedThread() {
+    stop();
+    join();
+    Logger::debug("Event-driven managed thread '{}' destroyed", name_);
+}
+
+void Application::EventDrivenManagedThread::thread_main() {
+    Logger::info("Event-driven managed thread '{}' starting", name_);
+
+    try {
+        // Set up work guard to keep IO context alive
+        work_guard_ = std::make_unique<asio::executor_work_guard<asio::io_context::executor_type>>(io_context_.get_executor());
+
+        // Start event-driven message processing
+        messaging_context_->start_event_processing();
+
+        // Run user function if provided
+        if (func_) {
+            asio::post(io_context_, [this]() {
+                try {
+                    func_(*this);
+                } catch (const std::exception& e) {
+                    Logger::error("Exception in event-driven thread function '{}': {}", name_, e.what());
+                }
+            });
+        }
+
+        // Run IO context (event loop)
+        io_context_.run();
+
+    } catch (const std::exception& e) {
+        Logger::error("Exception in event-driven managed thread '{}': {}", name_, e.what());
+    }
+
+    Logger::info("Event-driven managed thread '{}' stopped", name_);
+}
+
+void Application::EventDrivenManagedThread::post_task(std::function<void()> task) {
+    asio::post(io_context_, [task = std::move(task)]() {
+        try {
+            task();
+        } catch (const std::exception& e) {
+            Logger::error("Exception in event-driven managed thread task: {}", e.what());
+        }
+    });
+}
+
+void Application::EventDrivenManagedThread::stop() {
+    if (running_.load()) {
+        Logger::debug("Stopping event-driven managed thread '{}'", name_);
+
+        // Stop messaging context
+        if (messaging_context_) {
+            messaging_context_->stop();
+        }
+
+        // Release work guard to allow IO context to stop
+        work_guard_.reset();
+
+        // Stop the IO context
+        io_context_.stop();
+
+        running_.store(false);
+    }
+}
+
+void Application::EventDrivenManagedThread::join() {
+    if (thread_.joinable()) {
+        Logger::trace("Waiting for event-driven managed thread '{}' to finish", name_);
+        thread_.join();
+        Logger::trace("Event-driven managed thread '{}' finished", name_);
+    }
+}
+
 // Application Thread Management Methods
 
 std::shared_ptr<Application::ManagedThread>
@@ -719,6 +829,19 @@ Application::create_worker_thread(std::string name) {
         // Default worker thread just runs the event loop
         // Tasks can be posted to it using post_task()
     });
+}
+
+std::shared_ptr<Application::EventDrivenManagedThread>
+Application::create_event_driven_thread(std::string name) {
+    Logger::debug("Creating event-driven thread '{}'", name);
+
+    auto thread = std::make_shared<EventDrivenManagedThread>(std::move(name));
+
+    // Store reference to manage lifecycle (optional - or manage separately)
+    // For now, caller manages the thread lifecycle
+
+    Logger::info("Event-driven thread '{}' created successfully", thread->name());
+    return thread;
 }
 
 std::size_t Application::managed_thread_count() const {
@@ -762,6 +885,52 @@ Application::ManagedThread* Application::get_managed_thread(const std::string& n
                           });
 
     return it != managed_threads_.end() ? it->get() : nullptr;
+}
+
+// CLI Management
+
+CLI& Application::cli() const {
+    return CLI::instance();
+}
+
+bool Application::enable_cli(const CLIConfig& config) {
+    if (cli_enabled_) {
+        Logger::warn("CLI already enabled");
+        return true;
+    }
+
+    Logger::info("Enabling CLI");
+    auto& cli_instance = CLI::instance();
+    cli_instance.configure(config);
+
+    if (cli_instance.start(*const_cast<Application*>(this))) {
+        cli_enabled_ = true;
+        Logger::info("CLI enabled successfully");
+        return true;
+    } else {
+        Logger::error("Failed to start CLI");
+        return false;
+    }
+}
+
+bool Application::enable_cli() {
+    CLIConfig default_config{};
+    return enable_cli(default_config);
+}
+
+void Application::disable_cli() {
+    if (!cli_enabled_) {
+        return;
+    }
+
+    Logger::info("Disabling CLI");
+    CLI::instance().stop();
+    cli_enabled_ = false;
+    Logger::info("CLI disabled");
+}
+
+bool Application::is_cli_enabled() const {
+    return cli_enabled_ && CLI::instance().is_running();
 }
 
 } // namespace crux
