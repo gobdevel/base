@@ -1,190 +1,229 @@
 /*
  * @file logger.h
- * @brief Thread-safe logging utility wrapper for spdlog library
- * @author Gobind Prasad <gobdeveloper@gmail.com>
- * @date 2025
- * @version 1.0
+ * @brief Modern C++20 thread-safe logging wrapper for spdlog
  *
  * Copyright (c) 2025 Gobind Prasad <gobdeveloper@gmail.com>
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- *
  * SPDX-License-Identifier: MIT
  */
 
 #pragma once
+
 #include <spdlog/common.h>
 #include <spdlog/spdlog.h>
+#include <fmt/format.h>
+#include <string_view>
+#include <source_location>
+#include <memory>
+#include <filesystem>
 
 namespace crux {
 
 /**
- * @brief A thread-safe logging utility wrapper around spdlog library.
+ * @brief Log level enumeration for type-safe level specification.
+ */
+enum class LogLevel : int {
+    Trace = 0,
+    Debug = 1,
+    Info = 2,
+    Warn = 3,
+    Error = 4,
+    Critical = 5,
+    Off = 6
+};
+
+/**
+ * @brief Modern C++20 thread-safe logging utility with console and file output options.
  *
- * The Logger class provides a static interface for logging functionality
- * with support for different log levels (info, warn, error) and configurable
- * output destinations (console or rotating file).
+ * Features:
+ * - C++20 source location support
+ * - Type-safe log levels
+ * - Structured logging support
+ * - Automatic log rotation
+ * - Multiple output sinks
  *
- * @note This class is designed as a singleton pattern with static methods.
- * @note All logging operations are thread-safe when using spdlog backend.
- *
- * Example usage:
+ * Usage:
  * @code
- * // Initialize console logger
- * crux::Logger::init();
- *
- * // Or initialize file logger
- * crux::Logger::init("MyApp", "logs/app.log");
- *
- * // Log messages
- * crux::Logger::info("Application started");
- * crux::Logger::warn("Low memory warning: {}MB remaining", 128);
- * crux::Logger::error("Failed to connect to database: {}", error_msg);
+ * Logger::init();  // Console output
+ * Logger::init(LoggerConfig{.app_name = "MyApp", .log_file = "app.log"});
+ * Logger::info("User {} logged in", username);
+ * Logger::error("Failed with code: {}", error_code);
  * @endcode
  */
+/**
+ * @brief Configuration structure for logger initialization.
+ */
+struct LoggerConfig {
+    std::string app_name = "crux";
+    std::filesystem::path log_file{};
+    std::size_t max_file_size = 5 * 1024 * 1024;  // 5MB
+    std::size_t max_files = 3;
+    LogLevel level = LogLevel::Info;
+    bool enable_console = true;
+    bool enable_file = false;
+    bool enable_colors = true;  // Enable colored console output
+    std::string pattern = "[%Y-%m-%d %H:%M:%S.%e] [%n] [%^%l%$] %v";  // %^%l%$ for colored level
+};
+
 class Logger {
 public:
     /**
-     * @brief Initialize the logger with console output.
-     *
-     * Creates a colored console logger that outputs to stdout.
-     * This is suitable for development and debugging purposes.
-     *
-     * @note If a logger is already initialized, this will replace it.
+     * @brief Initialize console logger with colored output.
      */
     static void init();
 
     /**
-     * @brief Initialize the logger with rotating file output.
-     *
-     * Creates a rotating file logger that automatically manages log file
-     * rotation based on size limits. When the maximum file size is reached,
-     * the current log file is archived and a new one is created.
-     *
-     * @param appName The name identifier for the logger instance
-     * @param filename The path to the log file (directories will be created if needed)
-     *
-     * @note Maximum file size is set to 5MB with up to 3 archived files
-     * @note If a logger is already initialized, this will replace it
+     * @brief Initialize logger with comprehensive configuration.
+     * @param config Logger configuration
      */
-    static void init(const std::string appName, const std::string filename);
+    static void init(const LoggerConfig& config);
 
     /**
-     * @brief Log an informational message.
-     *
-     * Logs a message at INFO level with optional formatted arguments.
-     * Use this for general information about application flow and state.
-     *
-     * @tparam Args Variadic template parameter types for formatting arguments
-     * @param msg The message string, may contain format specifiers (e.g., "{}", "{0}")
-     * @param args Optional arguments to be formatted into the message string
-     *
-     * @note Uses fmt library formatting syntax
-     * @note No-op if logger is not initialized
-     *
-     * Example:
-     * @code
-     * Logger::info("User {} logged in from IP {}", username, ip_address);
-     * Logger::info("Processing {} files", file_count);
-     * @endcode
+     * @brief Initialize rotating file logger (legacy interface).
+     * @param app_name Logger identifier
+     * @param filename Log file path
+     * @deprecated Use init(LoggerConfig) instead
+     */
+    [[deprecated("Use init(LoggerConfig) instead")]]
+    static void init(std::string_view app_name, std::string_view filename);
+
+    /**
+     * @brief Check if logger is initialized.
+     * @return true if logger is ready for use
+     */
+    static bool is_initialized() noexcept { return s_logger != nullptr; }
+
+    /**
+     * @brief Get current log level.
+     * @return Current log level
+     */
+    static LogLevel get_level() noexcept;
+
+    /**
+     * @brief Log trace message with C++20 format and source location.
+     * @param fmt Format string
+     * @param args Format arguments
      */
     template <typename... Args>
-    static void info(const std::string msg, Args &&...args) {
-        if (s_logger) {
-            s_logger->info(msg, std::forward<Args>(args)...);
+    static void trace(std::string_view fmt, Args&&... args) {
+        if (s_logger && s_logger->should_log(spdlog::level::trace)) {
+            log_with_location(spdlog::level::trace, fmt, std::source_location::current(), std::forward<Args>(args)...);
         }
     }
 
     /**
-     * @brief Log a warning message.
-     *
-     * Logs a message at WARN level with optional formatted arguments.
-     * Use this for potentially harmful situations that don't prevent
-     * application execution but should be noted.
-     *
-     * @tparam Args Variadic template parameter types for formatting arguments
-     * @param msg The message string, may contain format specifiers (e.g., "{}", "{0}")
-     * @param args Optional arguments to be formatted into the message string
-     *
-     * @note Uses fmt library formatting syntax
-     * @note No-op if logger is not initialized
-     *
-     * Example:
-     * @code
-     * Logger::warn("Memory usage is high: {}%", memory_percentage);
-     * Logger::warn("Deprecated function called: {}", function_name);
-     * @endcode
+     * @brief Log debug message with C++20 format and source location.
+     * @param fmt Format string
+     * @param args Format arguments
      */
     template <typename... Args>
-    static void warn(const std::string msg, Args &&...args) {
-        if (s_logger) {
-            s_logger->warn(msg, std::forward<Args>(args)...);
+    static void debug(std::string_view fmt, Args&&... args) {
+        if (s_logger && s_logger->should_log(spdlog::level::debug)) {
+            log_with_location(spdlog::level::debug, fmt, std::source_location::current(), std::forward<Args>(args)...);
         }
     }
 
     /**
-     * @brief Log an error message.
-     *
-     * Logs a message at ERROR level with optional formatted arguments.
-     * Use this for error conditions that impact functionality but
-     * allow the application to continue running.
-     *
-     * @tparam Args Variadic template parameter types for formatting arguments
-     * @param msg The message string, may contain format specifiers (e.g., "{}", "{0}")
-     * @param args Optional arguments to be formatted into the message string
-     *
-     * @note Uses fmt library formatting syntax
-     * @note No-op if logger is not initialized
-     *
-     * Example:
-     * @code
-     * Logger::error("Failed to open file: {}", filename);
-     * Logger::error("Database connection failed with code: {}", error_code);
-     * @endcode
+     * @brief Log info message with C++20 format and source location.
+     * @param fmt Format string
+     * @param args Format arguments
      */
     template <typename... Args>
-    static void error(const std::string msg, Args &&...args) {
-        if (s_logger) {
-            s_logger->error(msg, std::forward<Args>(args)...);
+    static void info(std::string_view fmt, Args&&... args) {
+        if (s_logger && s_logger->should_log(spdlog::level::info)) {
+            log_with_location(spdlog::level::info, fmt, std::source_location::current(), std::forward<Args>(args)...);
         }
     }
 
     /**
-     * @brief Set the minimum log level for filtering messages.
-     *
-     * Configure the logger to only output messages at or above the specified level.
-     * Messages below this level will be filtered out and not logged.
-     *
-     * @param loglevel String representation of the log level.
-     *                 Valid values: "trace", "debug", "info", "warn", "error", "critical", "off"
-     *
-     * @note Case-insensitive string matching
-     * @note Invalid level strings will result in undefined behavior
-     * @note No-op if logger is not initialized
-     *
-     * Example:
-     * @code
-     * Logger::setLogLevel("warn");  // Only warn, error, and critical messages will be logged
-     * Logger::setLogLevel("debug"); // All messages except trace will be logged
-     * @endcode
+     * @brief Log warning message with C++20 format and source location.
+     * @param fmt Format string
+     * @param args Format arguments
      */
-    static void setLogLevel(const std::string &loglevel) {
-        auto level = spdlog::level::from_str(loglevel);
-        s_logger->set_level(level);
+    template <typename... Args>
+    static void warn(std::string_view fmt, Args&&... args) {
+        if (s_logger && s_logger->should_log(spdlog::level::warn)) {
+            log_with_location(spdlog::level::warn, fmt, std::source_location::current(), std::forward<Args>(args)...);
+        }
     }
+
+    /**
+     * @brief Log error message with C++20 format and source location.
+     * @param fmt Format string
+     * @param args Format arguments
+     */
+    template <typename... Args>
+    static void error(std::string_view fmt, Args&&... args) {
+        if (s_logger && s_logger->should_log(spdlog::level::err)) {
+            log_with_location(spdlog::level::err, fmt, std::source_location::current(), std::forward<Args>(args)...);
+        }
+    }
+
+    /**
+     * @brief Log critical message with C++20 format and source location.
+     * @param fmt Format string
+     * @param args Format arguments
+     */
+    template <typename... Args>
+    static void critical(std::string_view fmt, Args&&... args) {
+        if (s_logger && s_logger->should_log(spdlog::level::critical)) {
+            log_with_location(spdlog::level::critical, fmt, std::source_location::current(), std::forward<Args>(args)...);
+        }
+    }
+
+    /**
+     * @brief Set minimum log level using type-safe enum.
+     * @param level Log level
+     */
+    static void set_level(LogLevel level) noexcept;
+
+    /**
+     * @brief Set minimum log level using string (legacy interface).
+     * @param loglevel Log level string
+     * @deprecated Use set_level(LogLevel) instead
+     */
+    [[deprecated("Use set_level(LogLevel) instead")]]
+    static void setLogLevel(std::string_view loglevel);
+
+    /**
+     * @brief Flush all pending log messages.
+     */
+    static void flush() noexcept;
+
+    /**
+     * @brief Shutdown logger and cleanup resources.
+     */
+    static void shutdown() noexcept;
 
 private:
-    /**
-     * @brief Shared pointer to the underlying spdlog logger instance.
-     *
-     * This static member holds the singleton logger instance used by all
-     * logging operations. It's initialized by calling one of the init() methods
-     * and is shared across all threads in the application.
-     *
-     * @note Thread-safe access is provided by the spdlog library
-     * @note Nullptr when not initialized
-     */
     static std::shared_ptr<spdlog::logger> s_logger;
+
+    /**
+     * @brief Internal logging function with source location support.
+     */
+    template <typename... Args>
+    static void log_with_location(spdlog::level::level_enum level,
+                                 std::string_view fmt,
+                                 const std::source_location& loc,
+                                 Args&&... args) {
+        spdlog::source_loc source_loc{loc.file_name(), static_cast<int>(loc.line()), loc.function_name()};
+
+        if constexpr (sizeof...(args) > 0) {
+            // Use spdlog's runtime format to avoid consteval issues
+            s_logger->log(source_loc, level, fmt::runtime(fmt), std::forward<Args>(args)...);
+        } else {
+            s_logger->log(source_loc, level, fmt::runtime(fmt));
+        }
+    }
+
+    /**
+     * @brief Convert LogLevel enum to spdlog level.
+     */
+    static spdlog::level::level_enum to_spdlog_level(LogLevel level) noexcept;
+
+    /**
+     * @brief Convert spdlog level to LogLevel enum.
+     */
+    static LogLevel from_spdlog_level(spdlog::level::level_enum level) noexcept;
 };
-}  // namespace crux
+
+} // namespace crux

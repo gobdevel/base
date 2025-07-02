@@ -42,6 +42,7 @@ class cruxRecipe(ConanFile):
 
     def requirements(self):
         self.requires("spdlog/1.15.3", transitive_headers=True)
+        self.requires("tomlplusplus/3.4.0", transitive_headers=True)
         self.test_requires("gtest/1.16.0")
 
     def layout(self):

@@ -1,95 +1,145 @@
 /*
  * @file logger.cpp
- * @brief Implementation of thread-safe logging utility wrapper for spdlog library
- * @author Gobind Prasad <gobdeveloper@gmail.com>
- * @date 2025
- * @version 1.0
- *
- * This file contains the implementation of the Logger class methods for
- * initializing console and rotating file loggers using the spdlog library.
+ * @brief Modern C++20 logger implementation using spdlog
  *
  * Copyright (c) 2025 Gobind Prasad <gobdeveloper@gmail.com>
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- *
  * SPDX-License-Identifier: MIT
  */
 
 #include <logger.h>
 
-// spdlog includes for different sink types
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/sinks/basic_file_sink.h>
+#include <filesystem>
+#include <vector>
 
 namespace crux {
 
-// Static member definition - shared across all instances and threads
 std::shared_ptr<spdlog::logger> Logger::s_logger{nullptr};
 
-/**
- * @brief Initialize console logger with colored output.
- *
- * Creates a multi-threaded console logger that outputs colored log messages
- * to stdout. This is the simplest initialization method, suitable for
- * development, debugging, and applications that don't require persistent logging.
- *
- * The logger is created with the name "console" and uses spdlog's
- * stdout_color_mt sink which provides:
- * - Thread-safe operations
- * - Colored output based on log level
- * - Direct output to standard output stream
- *
- * @note Replaces any existing logger instance
- * @note Thread-safe operation guaranteed by spdlog
- *
- * @see spdlog::stdout_color_mt() for underlying implementation details
- */
 void Logger::init() {
-    s_logger = spdlog::stdout_color_mt("console");
+    LoggerConfig config{
+        .enable_console = true,
+        .enable_file = false
+    };
+    init(config);
 }
 
-/**
- * @brief Initialize rotating file logger with specified configuration.
- *
- * Creates a multi-threaded rotating file logger that automatically manages
- * log file rotation based on file size limits. This is suitable for production
- * applications that require persistent logging with automatic log management.
- *
- * Configuration details:
- * - Maximum file size: 5MB (5,242,880 bytes)
- * - Maximum number of archived files: 3
- * - Rotation behavior: When max size is reached, current file is renamed
- *   with a numeric suffix and a new log file is created
- *
- * File naming convention:
- * - Active log: {filename}
- * - Archived logs: {filename}.1, {filename}.2, {filename}.3
- *
- * @param appName The application name used as logger identifier
- * @param filename The path to the log file (parent directories must exist)
- *
- * @note If a logger already exists, it will be properly cleaned up before
- *       creating the new one
- * @note Thread-safe operation guaranteed by spdlog
- * @note Parent directories of the log file must exist, or an exception will be thrown
- *
- * @throws spdlog::spdlog_ex if file creation fails or directory doesn't exist
- *
- * @see spdlog::rotating_logger_mt() for underlying implementation details
- */
-void Logger::init(const std::string appName, const std::string filename) {
-    // Configuration constants for file rotation
-    constexpr auto max_size  = 1048576 * 5;  // 5MB in bytes
-    constexpr auto max_files = 3;            // Keep 3 archived log files
-
-    // Clean up existing logger if present to prevent resource leaks
+void Logger::init(const LoggerConfig& config) {
+    // Drop existing logger if it exists
     if (s_logger) {
+        spdlog::drop(s_logger->name());
         s_logger.reset();
     }
 
-    // Create the rotating file logger with specified parameters
-    s_logger =
-        spdlog::rotating_logger_mt(appName, filename, max_size, max_files);
+    std::vector<spdlog::sink_ptr> sinks;
+
+    // Add console sink if enabled
+    if (config.enable_console) {
+        auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+        console_sink->set_pattern(config.pattern);
+
+        // Set color mode based on configuration
+        if (config.enable_colors) {
+            console_sink->set_color_mode(spdlog::color_mode::always);
+        } else {
+            console_sink->set_color_mode(spdlog::color_mode::never);
+        }
+
+        sinks.push_back(console_sink);
+    }
+
+    // Add file sink if enabled
+    if (config.enable_file && !config.log_file.empty()) {
+        // Create directory if it doesn't exist
+        if (auto parent = config.log_file.parent_path(); !parent.empty()) {
+            std::filesystem::create_directories(parent);
+        }
+
+        auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+            config.log_file.string(), config.max_file_size, config.max_files);
+        file_sink->set_pattern(config.pattern);
+        sinks.push_back(file_sink);
+    }
+
+    // Create logger with sinks
+    s_logger = std::make_shared<spdlog::logger>(config.app_name, sinks.begin(), sinks.end());
+    s_logger->set_level(to_spdlog_level(config.level));
+    s_logger->flush_on(spdlog::level::err);
+
+    // Register with spdlog for global access
+    spdlog::register_logger(s_logger);
 }
-}  // namespace crux
+
+void Logger::init(std::string_view app_name, std::string_view filename) {
+    LoggerConfig config{
+        .app_name = std::string{app_name},
+        .log_file = std::filesystem::path{filename},
+        .enable_console = false,
+        .enable_file = true
+    };
+    init(config);
+}
+
+LogLevel Logger::get_level() noexcept {
+    if (!s_logger) {
+        return LogLevel::Off;
+    }
+    return from_spdlog_level(s_logger->level());
+}
+
+void Logger::set_level(LogLevel level) noexcept {
+    if (s_logger) {
+        s_logger->set_level(to_spdlog_level(level));
+    }
+}
+
+void Logger::setLogLevel(std::string_view loglevel) {
+    if (s_logger) {
+        auto level = spdlog::level::from_str(std::string{loglevel});
+        s_logger->set_level(level);
+    }
+}
+
+void Logger::flush() noexcept {
+    if (s_logger) {
+        s_logger->flush();
+    }
+}
+
+void Logger::shutdown() noexcept {
+    if (s_logger) {
+        s_logger->flush();
+        spdlog::drop(s_logger->name());
+        s_logger.reset();
+    }
+}
+
+spdlog::level::level_enum Logger::to_spdlog_level(LogLevel level) noexcept {
+    switch (level) {
+        case LogLevel::Trace:    return spdlog::level::trace;
+        case LogLevel::Debug:    return spdlog::level::debug;
+        case LogLevel::Info:     return spdlog::level::info;
+        case LogLevel::Warn:     return spdlog::level::warn;
+        case LogLevel::Error:    return spdlog::level::err;
+        case LogLevel::Critical: return spdlog::level::critical;
+        case LogLevel::Off:      return spdlog::level::off;
+        default:                 return spdlog::level::info;
+    }
+}
+
+LogLevel Logger::from_spdlog_level(spdlog::level::level_enum level) noexcept {
+    switch (level) {
+        case spdlog::level::trace:    return LogLevel::Trace;
+        case spdlog::level::debug:    return LogLevel::Debug;
+        case spdlog::level::info:     return LogLevel::Info;
+        case spdlog::level::warn:     return LogLevel::Warn;
+        case spdlog::level::err:      return LogLevel::Error;
+        case spdlog::level::critical: return LogLevel::Critical;
+        case spdlog::level::off:      return LogLevel::Off;
+        default:                      return LogLevel::Info;
+    }
+}
+
+} // namespace crux
