@@ -43,6 +43,9 @@ class cruxRecipe(ConanFile):
     def requirements(self):
         self.requires("spdlog/1.15.3", transitive_headers=True)
         self.requires("tomlplusplus/3.4.0", transitive_headers=True)
+        self.requires(
+            "asio/1.34.2", transitive_headers=True
+        )  # Standalone ASIO (header-only)
         self.test_requires("gtest/1.16.0")
 
     def layout(self):

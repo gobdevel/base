@@ -8,10 +8,12 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(spdlog REQUIRED)
 find_package(tomlplusplus REQUIRED)
+find_package(asio REQUIRED)
 
 add_library(crux
     src/logger.cpp
     src/config.cpp
+    src/application.cpp
 )
 target_include_directories(crux PUBLIC include)
 
@@ -27,6 +29,10 @@ target_link_libraries(color_test crux)
 add_executable(logger_config_demo src/logger_config_demo.cpp)
 target_link_libraries(logger_config_demo crux)
 
+# Application framework example
+add_executable(app_example src/app_example.cpp)
+target_link_libraries(app_example crux)
+
 if (NOT BUILD_TESTING STREQUAL OFF)
     add_subdirectory(tests)
 endif()
@@ -34,7 +40,8 @@ endif()
 target_link_libraries(crux
     spdlog::spdlog
     tomlplusplus::tomlplusplus
+    asio::asio
 )
 
-set_target_properties(crux PROPERTIES PUBLIC_HEADER "include/logger.h;include/config.h;include/singleton.h")
+set_target_properties(crux PROPERTIES PUBLIC_HEADER "include/logger.h;include/config.h;include/singleton.h;include/application.h")
 install(TARGETS crux)

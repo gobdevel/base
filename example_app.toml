@@ -1,0 +1,53 @@
+# Example Application Configuration
+# This configuration demonstrates the Crux application framework
+
+[example_app]
+
+# Application settings
+[example_app.app]
+name = "ExampleApp"
+version = "1.0.0"
+description = "Example application demonstrating the Crux framework"
+debug_mode = true
+worker_threads = 2
+working_directory = "/tmp"
+
+# Logging configuration
+[example_app.logging]
+level = "debug"
+pattern = "[%Y-%m-%d %H:%M:%S.%e] [%n] [%^%l%$] [%s:%#] %v"
+enable_console = true
+enable_file = true
+file_path = "logs/example_app.log"
+max_file_size = 5242880                                     # 5MB
+max_files = 3
+flush_immediately = false
+enable_colors = true
+
+# Network configuration for HTTP server component
+[example_app.network]
+host = "0.0.0.0"
+port = 8080
+timeout_seconds = 30
+max_connections = 100
+
+# Database configuration
+[example_app.database]
+host = "localhost"
+port = 5432
+name = "example_db"
+user = "example_user"
+max_connections = 10
+connection_timeout = 30
+
+# Custom application settings
+[example_app.http_server]
+port = 8080
+enable_ssl = false
+max_request_size = 1048576 # 1MB
+request_timeout = 30
+
+[example_app.features]
+enable_metrics = true
+enable_health_endpoint = true
+enable_admin_api = true
