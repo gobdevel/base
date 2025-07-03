@@ -634,7 +634,7 @@ int main(int argc, char** argv) {
     Logger::set_level(LogLevel::Error);
     
     std::cout << "\n" << std::string(60, '=') << "\n";
-    std::cout << "CRUX CLI UNIT TEST SUITE\n";
+    std::cout << "BASE CLI UNIT TEST SUITE\n";
     std::cout << std::string(60, '=') << "\n\n";
     
     int result = RUN_ALL_TESTS();
