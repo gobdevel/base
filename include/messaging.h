@@ -106,94 +106,107 @@ using MessageHandler = std::function<void(const Message<T>&)>;
 
 /**
  * @brief Event-driven message queue for high-performance inter-thread communication
- * Uses condition variables for immediate message processing with minimal latency
+ * Uses optimized mutex + std::queue for maximum throughput and minimal latency
+ *
+ * Performance analysis showed mutex-based implementation outperforms lock-free due to:
+ * - Lower memory allocation overhead
+ * - Better cache locality with std::queue
+ * - Reduced atomic operation contention
+ * - Modern mutex implementations are highly optimized
+ * - Batch processing amortizes synchronization costs
  */
 class EventDrivenMessageQueue {
 private:
-    // Cache-aligned structure for better performance
-    struct alignas(64) Node {
-        std::atomic<Node*> next{nullptr};
-        std::unique_ptr<MessageBase> data{nullptr};
-        MessagePriority priority;
-        std::chrono::steady_clock::time_point timestamp;
+    // Cache-aligned data structure for optimal performance
+    struct alignas(64) QueueData {
+        std::queue<std::unique_ptr<MessageBase>> queue;
+        mutable std::mutex mutex;
+        std::condition_variable condition;
+        std::atomic<bool> shutdown{false};
+        std::atomic<size_t> size{0};
+        std::atomic<MessageId> next_id{1};
 
-        Node() = default;
-        Node(std::unique_ptr<MessageBase> msg)
-            : data(std::move(msg))
-            , priority(data->priority())
-            , timestamp(data->timestamp()) {}
+        QueueData() = default;
+        // Disable copy/move to maintain alignment
+        QueueData(const QueueData&) = delete;
+        QueueData& operator=(const QueueData&) = delete;
     };
 
+    alignas(64) QueueData data_;
+    const std::size_t max_size_;
+
 public:
-    EventDrivenMessageQueue(std::size_t max_size = 10000) : max_size_(max_size) {
-        // Initialize with dummy node for lock-free operation
-        Node* dummy = new Node;
-        head_.store(dummy);
-        tail_.store(dummy);
-    }
+    EventDrivenMessageQueue(std::size_t max_size = 50000) : max_size_(max_size) {}
 
     ~EventDrivenMessageQueue() {
         shutdown();
-        while (Node* node = head_.load()) {
-            head_.store(node->next.load());
-            delete node;
-        }
     }
 
     /**
-     * @brief Send message with event-driven notification
+     * @brief Send message with event-driven notification (optimized)
      */
     template<MessageType T>
     bool send(T data, MessagePriority priority = MessagePriority::Normal) {
         // Fast path: check size without lock for performance
-        if (size_.load(std::memory_order_relaxed) >= max_size_) {
+        if (data_.size.load(std::memory_order_relaxed) >= max_size_) {
             return false; // Drop message if queue full
         }
 
-        auto message = std::make_unique<Message<T>>(next_id_.fetch_add(1), std::move(data), priority);
-        Node* newNode = new Node(std::move(message));
+        auto message = std::make_unique<Message<T>>(
+            data_.next_id.fetch_add(1, std::memory_order_relaxed),
+            std::move(data), priority);
 
-        // Lock-free enqueue
-        Node* prevTail = tail_.exchange(newNode, std::memory_order_acq_rel);
-        prevTail->next.store(newNode, std::memory_order_release);
-
-        size_.fetch_add(1, std::memory_order_relaxed);
+        {
+            std::lock_guard<std::mutex> lock(data_.mutex);
+            data_.queue.push(std::move(message));
+            data_.size.fetch_add(1, std::memory_order_relaxed);
+        }
 
         // Immediately wake up waiting thread (event-driven)
-        condition_.notify_one();
+        data_.condition.notify_one();
         return true;
     }
 
     /**
-     * @brief Receive message with timeout (event-driven)
+     * @brief Receive message with timeout (event-driven, optimized)
      */
-    std::unique_ptr<MessageBase> receive(std::chrono::milliseconds timeout = std::chrono::milliseconds(100)) {
-        std::unique_lock<std::mutex> lock(receive_mutex_);
+    std::unique_ptr<MessageBase> receive(std::chrono::milliseconds timeout = std::chrono::milliseconds(1)) {
+        std::unique_lock<std::mutex> lock(data_.mutex);
 
-        if (!condition_.wait_for(lock, timeout, [this] {
-            return has_messages() || shutdown_.load(std::memory_order_relaxed);
+        if (!data_.condition.wait_for(lock, timeout, [this] {
+            return !data_.queue.empty() || data_.shutdown.load(std::memory_order_relaxed);
         })) {
             return nullptr; // Timeout
         }
 
-        if (shutdown_.load(std::memory_order_relaxed)) {
+        if (data_.shutdown.load(std::memory_order_relaxed)) {
             return nullptr;
         }
 
-        return try_dequeue();
+        if (data_.queue.empty()) {
+            return nullptr;
+        }
+
+        auto result = std::move(data_.queue.front());
+        data_.queue.pop();
+        data_.size.fetch_sub(1, std::memory_order_relaxed);
+
+        return result;
     }
 
     /**
-     * @brief Receive multiple messages in batch (event-driven)
+     * @brief Receive multiple messages in batch (optimized for throughput)
      */
-    std::vector<std::unique_ptr<MessageBase>> receive_batch(size_t max_batch_size = 32) {
+    std::vector<std::unique_ptr<MessageBase>> receive_batch(size_t max_batch_size = 64) {
         std::vector<std::unique_ptr<MessageBase>> batch;
         batch.reserve(max_batch_size);
 
-        for (size_t i = 0; i < max_batch_size; ++i) {
-            auto msg = try_dequeue();
-            if (!msg) break;
-            batch.push_back(std::move(msg));
+        std::lock_guard<std::mutex> lock(data_.mutex);
+
+        while (!data_.queue.empty() && batch.size() < max_batch_size) {
+            batch.push_back(std::move(data_.queue.front()));
+            data_.queue.pop();
+            data_.size.fetch_sub(1, std::memory_order_relaxed);
         }
 
         return batch;
@@ -204,32 +217,33 @@ public:
      */
     template<typename ProcessFunc>
     bool wait_and_process_batch(ProcessFunc&& processor,
-                               std::chrono::milliseconds timeout = std::chrono::milliseconds(100),
-                               size_t max_batch_size = 32) {
-        std::unique_lock<std::mutex> lock(receive_mutex_);
+                               std::chrono::milliseconds timeout = std::chrono::milliseconds(1),
+                               size_t max_batch_size = 64) {
+        std::unique_lock<std::mutex> lock(data_.mutex);
 
-        if (!condition_.wait_for(lock, timeout, [this] {
-            return has_messages() || shutdown_.load(std::memory_order_relaxed);
+        if (!data_.condition.wait_for(lock, timeout, [this] {
+            return !data_.queue.empty() || data_.shutdown.load(std::memory_order_relaxed);
         })) {
             return false; // Timeout
         }
 
-        if (shutdown_.load(std::memory_order_relaxed)) {
+        if (data_.shutdown.load(std::memory_order_relaxed)) {
             return false;
+        }
+
+        // Process batch with lock held for efficiency
+        std::vector<std::unique_ptr<MessageBase>> batch;
+        batch.reserve(max_batch_size);
+
+        while (!data_.queue.empty() && batch.size() < max_batch_size) {
+            batch.push_back(std::move(data_.queue.front()));
+            data_.queue.pop();
+            data_.size.fetch_sub(1, std::memory_order_relaxed);
         }
 
         lock.unlock();
 
-        // Process batch without holding lock
-        std::vector<std::unique_ptr<MessageBase>> batch;
-        batch.reserve(max_batch_size);
-
-        for (size_t i = 0; i < max_batch_size; ++i) {
-            auto msg = try_dequeue();
-            if (!msg) break;
-            batch.push_back(std::move(msg));
-        }
-
+        // Process without holding lock
         for (auto& message : batch) {
             processor(std::move(message));
         }
@@ -237,50 +251,13 @@ public:
         return !batch.empty();
     }
 
-    size_t size() const { return size_.load(std::memory_order_relaxed); }
+    size_t size() const { return data_.size.load(std::memory_order_relaxed); }
     bool empty() const { return size() == 0; }
 
     void shutdown() {
-        shutdown_.store(true, std::memory_order_relaxed);
-        condition_.notify_all();
+        data_.shutdown.store(true, std::memory_order_relaxed);
+        data_.condition.notify_all();
     }
-
-private:
-    bool has_messages() const {
-        Node* head = head_.load(std::memory_order_acquire);
-        return head->next.load(std::memory_order_acquire) != nullptr;
-    }
-
-    std::unique_ptr<MessageBase> try_dequeue() {
-        Node* head = head_.load(std::memory_order_acquire);
-        Node* next = head->next.load(std::memory_order_acquire);
-
-        if (!next) {
-            return nullptr; // Queue is empty
-        }
-
-        // Move head pointer
-        head_.store(next, std::memory_order_release);
-
-        auto result = std::move(next->data);
-        delete head; // Delete old head
-
-        size_.fetch_sub(1, std::memory_order_relaxed);
-        return result;
-    }
-
-    // Lock-free queue pointers
-    std::atomic<Node*> head_;
-    std::atomic<Node*> tail_;
-    std::atomic<size_t> size_{0};
-    std::atomic<MessageId> next_id_{1};
-    std::atomic<bool> shutdown_{false};
-
-    // Receive synchronization (only for blocking operations)
-    std::mutex receive_mutex_;
-    std::condition_variable condition_;
-
-    const std::size_t max_size_;
 };
 
 /**

@@ -111,6 +111,31 @@ run_messaging_stress_test() {
     log_success "Messaging stress test completed"
 }
 
+# Function to run simple performance example
+run_simple_performance_example() {
+    log_info "Running simple performance example..."
+
+    cd "$PROJECT_ROOT"
+
+    echo ""
+    echo "========================================"
+    echo "SIMPLE PERFORMANCE EXAMPLE"
+    echo "========================================"
+    echo ""
+
+    if [ -f "build/Release/examples/simple_performance_test" ]; then
+        log_info "Running simple performance test..."
+        ./build/Release/examples/simple_performance_test
+        echo ""
+    else
+        log_warning "Simple performance test not found, running messaging performance instead..."
+        ./build/Release/tests/test_base --gtest_filter="*PerformanceBasics*" || log_warning "Performance test may have failed"
+        echo ""
+    fi
+
+    log_success "Simple performance example completed"
+}
+
 # Function to run all messaging examples
 run_messaging_examples() {
     log_info "Running messaging examples for performance observation..."
@@ -125,8 +150,17 @@ run_messaging_examples() {
 
     if [ -f "build/Release/examples/messaging_example" ]; then
         log_info "Running messaging example..."
-        timeout 30s ./build/Release/examples/messaging_example || log_warning "Messaging example timed out (normal)"
+        if command -v timeout &> /dev/null; then
+            gtimeout 30s ./build/Release/examples/messaging_example || log_warning "Messaging example timed out (normal)"
+        elif command -v gtimeout &> /dev/null; then
+            timeout 30s ./build/Release/examples/messaging_example || log_warning "Messaging example timed out (normal)"
+        else
+            log_info "Running messaging example (no timeout available)..."
+            ./build/Release/examples/messaging_example || log_warning "Messaging example may have issues"
+        fi
         echo ""
+    else
+        log_warning "Messaging example not found at build/Release/examples/messaging_example"
     fi
 
     log_success "Messaging examples completed"
@@ -207,8 +241,13 @@ measure_build_performance() {
 
     start_time=$(date +%s.%N)
 
-    conan install . --build=missing -s build_type=Release > /dev/null 2>&1
-    cmake --preset conan-release > /dev/null 2>&1
+    # Install dependencies
+    conan install . --output-folder=build/Release --build=missing -s build_type=Release > /dev/null 2>&1
+
+    # Configure cmake directly to avoid preset issues
+    cmake -B build/Release -S . -DCMAKE_TOOLCHAIN_FILE=build/Release/generators/conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1
+
+    # Build
     cmake --build build/Release > /dev/null 2>&1
 
     end_time=$(date +%s.%N)

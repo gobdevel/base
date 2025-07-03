@@ -1,5 +1,0 @@
-[2025-07-01 23:02:15] [logger_demo] [info] Logger now configured from TOML file
-[2025-07-01 23:02:15] [logger_demo] [debug] Debug logging enabled via configuration
-[2025-07-01 23:02:15] [logger_demo] [warning] File logging enabled - check logs/config_demo.log
-[2025-07-01 23:02:15] [logger_demo] [info] Server will listen on localhost:8080
-[2025-07-01 23:02:15] [logger_demo] [info] Database connection: db.example.com:5432

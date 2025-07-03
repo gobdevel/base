@@ -9,6 +9,8 @@
 
 .DS_Store
 .vscode/
+logs/
+benchmark_results/
 
 # Compiled Object files
 *.slo
