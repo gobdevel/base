@@ -14,7 +14,7 @@
 #include <filesystem>
 #include <vector>
 
-namespace crux {
+namespace base {
 
 std::shared_ptr<spdlog::logger> Logger::s_logger{nullptr};
 
@@ -142,4 +142,4 @@ LogLevel Logger::from_spdlog_level(spdlog::level::level_enum level) noexcept {
     }
 }
 
-} // namespace crux
+} // namespace base

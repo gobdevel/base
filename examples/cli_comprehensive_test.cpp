@@ -25,7 +25,7 @@
 #include <vector>
 #include <sstream>
 
-using namespace crux;
+using namespace base;
 
 class CLITestApp : public Application {
 private:
@@ -123,7 +123,7 @@ private:
 
     void run_comprehensive_tests() {
         std::cout << "\n" << std::string(60, '=') << "\n";
-        std::cout << "CRUX CLI COMPREHENSIVE TEST SUITE\n";
+        std::cout << "BASE CLI COMPREHENSIVE TEST SUITE\n";
         std::cout << std::string(60, '=') << "\n\n";
 
         bool all_tests_passed = true;

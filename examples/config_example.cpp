@@ -11,7 +11,7 @@
 #include <iostream>
 #include <filesystem>
 
-using namespace crux;
+using namespace base;
 
 void demonstrate_config_loading() {
     std::cout << "\n=== Configuration Loading Demo ===\n";

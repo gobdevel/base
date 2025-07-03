@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Simple CLI test script
-echo "Testing Crux CLI functionality..."
+echo "Testing Base CLI functionality..."
 
 # Start the simple CLI test with timeout and input
 {

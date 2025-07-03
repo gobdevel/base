@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Test all examples script
-echo "=== Testing All Crux Framework Examples ==="
+echo "=== Testing All Base Framework Examples ==="
 echo
 
 # Colors for output

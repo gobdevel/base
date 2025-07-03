@@ -30,7 +30,7 @@
 #include <future>
 #include <sstream>
 
-using namespace crux;
+using namespace base;
 
 // ============================================================================
 // Mock Application for Testing

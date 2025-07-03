@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # CLI Integration Test Script
-# Tests the Crux CLI functionality with automated input
+# Tests the Base CLI functionality with automated input
 
-echo "=== Crux CLI Integration Tests ==="
+echo "=== Base CLI Integration Tests ==="
 echo
 
 # Test 1: Simple CLI Test with basic commands

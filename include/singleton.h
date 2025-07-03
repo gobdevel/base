@@ -11,7 +11,7 @@
 #include <memory>
 #include <utility>
 
-namespace crux {
+namespace base {
 
 /**
  * @brief Static singleton factory - provides thread-safe access to singleton instances.
@@ -121,4 +121,4 @@ protected:
     virtual ~SingletonBase() = default;
 };
 
-} // namespace crux
+} // namespace base

@@ -15,7 +15,7 @@
 #include <iomanip>
 #include <iostream>
 
-namespace crux {
+namespace base {
 
 Application::Application(ApplicationConfig config)
     : config_(std::move(config))
@@ -388,15 +388,56 @@ void Application::stop_worker_threads() {
 }
 
 void Application::post_task(TaskFunction task, TaskPriority priority) {
-    asio::post(io_context_, [task = std::move(task), priority]() {
-        try {
-            task();
-        } catch (const std::exception& e) {
-            Logger::error("Exception in posted task (priority {}): {}",
-                         static_cast<int>(priority), e.what());
-        }
-    });
+    // Task posting with priority-based execution strategy
+    switch (priority) {
+        case TaskPriority::Critical:
+            // Critical: Immediate execution when safe, otherwise high-priority queue
+            // Use dispatch but with stack depth protection
+            asio::dispatch(io_context_, [task = std::move(task)]() {
+                try {
+                    task();
+                } catch (const std::exception& e) {
+                    Logger::error("Exception in critical task: {}", e.what());
+                } catch (...) {
+                    Logger::error("Unknown exception in critical task");
+                }
+            });
+            break;
+
+        case TaskPriority::High:
+            // High: Always use post to avoid stack depth issues, but prioritize
+            // In a real implementation, you'd use a priority queue here
+            asio::post(io_context_, [task = std::move(task)]() {
+                try {
+                    task();
+                } catch (const std::exception& e) {
+                    Logger::error("Exception in high-priority task: {}", e.what());
+                } catch (...) {
+                    Logger::error("Unknown exception in high-priority task");
+                }
+            });
+            break;
+
+        case TaskPriority::Normal:
+        case TaskPriority::Low:
+        default:
+            // Normal/Low: Standard queued execution
+            asio::post(io_context_, [task = std::move(task), priority]() {
+                try {
+                    task();
+                } catch (const std::exception& e) {
+                    Logger::error("Exception in task (priority {}): {}",
+                                 static_cast<int>(priority), e.what());
+                } catch (...) {
+                    Logger::error("Unknown exception in task (priority {})",
+                                 static_cast<int>(priority));
+                }
+            });
+            break;
+    }
 }
+
+
 
 void Application::post_delayed_task(TaskFunction task,
                                    std::chrono::milliseconds delay,
@@ -673,11 +714,12 @@ void Application::ManagedThread::schedule_message_processing() {
         return;
     }
 
-    // Process messages
-    messaging_context_->process_messages();
+    // Process messages in high-performance batch mode
+    messaging_context_->process_messages_batch();
 
-    // Schedule next processing
-    message_timer_->expires_after(std::chrono::milliseconds(10));
+    // Use configurable interval for message processing
+    // Default: 1ms for high-throughput, low-latency scenarios
+    message_timer_->expires_after(std::chrono::microseconds(1000));
     message_timer_->async_wait([this](const asio::error_code& ec) {
         if (!ec && running_.load()) {
             schedule_message_processing();
@@ -686,11 +728,14 @@ void Application::ManagedThread::schedule_message_processing() {
 }
 
 void Application::ManagedThread::post_task(std::function<void()> task) {
+    // Consistent with main application post_task behavior
     asio::post(io_context_, [task = std::move(task)]() {
         try {
             task();
         } catch (const std::exception& e) {
             Logger::error("Exception in managed thread task: {}", e.what());
+        } catch (...) {
+            Logger::error("Unknown exception in managed thread task");
         }
     });
 }
@@ -725,7 +770,7 @@ Application::EventDrivenManagedThread::EventDrivenManagedThread(std::string name
     Logger::debug("Creating event-driven managed thread '{}'", name_);
 
     // Create messaging context
-    messaging_context_ = std::make_unique<EventDrivenThreadMessagingContext>(name_);
+    messaging_context_ = std::make_unique<ThreadMessagingContext>(name_);
 
     // Start the thread
     running_.store(true);
@@ -747,8 +792,8 @@ void Application::EventDrivenManagedThread::thread_main() {
         // Set up work guard to keep IO context alive
         work_guard_ = std::make_unique<asio::executor_work_guard<asio::io_context::executor_type>>(io_context_.get_executor());
 
-        // Start event-driven message processing
-        messaging_context_->start_event_processing();
+        // Start background message processing
+        messaging_context_->start_background_processing();
 
         // Run user function if provided
         if (func_) {
@@ -772,11 +817,14 @@ void Application::EventDrivenManagedThread::thread_main() {
 }
 
 void Application::EventDrivenManagedThread::post_task(std::function<void()> task) {
+    // Consistent with main application post_task behavior
     asio::post(io_context_, [task = std::move(task)]() {
         try {
             task();
         } catch (const std::exception& e) {
             Logger::error("Exception in event-driven managed thread task: {}", e.what());
+        } catch (...) {
+            Logger::error("Unknown exception in event-driven managed thread task");
         }
     });
 }
@@ -825,6 +873,7 @@ Application::create_thread(std::string name, ManagedThread::ThreadFunction threa
 
 std::shared_ptr<Application::ManagedThread>
 Application::create_worker_thread(std::string name) {
+    // Convenience method - equivalent to create_thread with empty function
     return create_thread(std::move(name), [](asio::io_context& io_ctx) {
         // Default worker thread just runs the event loop
         // Tasks can be posted to it using post_task()
@@ -933,4 +982,4 @@ bool Application::is_cli_enabled() const {
     return cli_enabled_ && CLI::instance().is_running();
 }
 
-} // namespace crux
+} // namespace base

@@ -1,6 +1,6 @@
-# Crux CLI - Runtime Inspection and Debugging
+# Base CLI - Runtime Inspection and Debugging
 
-The Crux CLI provides runtime inspection and debugging capabilities for Crux applications. It offers both stdin-based and optional TCP-based interfaces for monitoring and controlling application internals in real-time.
+The Base CLI provides runtime inspection and debugging capabilities for Base applications. It offers both stdin-based and optional TCP-based interfaces for monitoring and controlling application internals in real-time.
 
 ## Features
 
@@ -295,4 +295,4 @@ CLIConfig config{
 7. **Use appropriate log levels** for CLI operations
 8. **Document custom commands** for your team
 
-The CLI feature significantly enhances the debuggability and maintainability of Crux applications by providing real-time access to internal state and controls.
+The CLI feature significantly enhances the debuggability and maintainability of Base applications by providing real-time access to internal state and controls.

@@ -1,6 +1,6 @@
 /*
  * @file benchmark_runner.cpp
- * @brief Comprehensive benchmark suite for Crux framework
+ * @brief Comprehensive benchmark suite for Base framework
  *
  * This file contains performance benchmarks for all major components:
  * - Logger performance (sync/async)
@@ -29,7 +29,7 @@
 #include <algorithm>
 #include <fstream>
 
-using namespace crux;
+using namespace base;
 
 class BenchmarkRunner {
 public:
@@ -431,7 +431,7 @@ max_size = 1000000
     }
 
     void run_all_benchmarks() {
-        std::cout << "Starting Crux Framework Benchmark Suite..." << std::endl;
+        std::cout << "Starting Base Framework Benchmark Suite..." << std::endl;
         std::cout << "This may take several minutes to complete." << std::endl;
 
         run_logger_benchmarks();

@@ -1,5 +1,5 @@
 # Example Application Configuration
-# This configuration demonstrates the Crux application framework
+# This configuration demonstrates the Base application framework
 
 [example_app]
 
@@ -7,7 +7,7 @@
 [example_app.app]
 name = "ExampleApp"
 version = "1.0.0"
-description = "Example application demonstrating the Crux framework"
+description = "Example application demonstrating the Base framework"
 debug_mode = true
 worker_threads = 2
 working_directory = "/tmp"

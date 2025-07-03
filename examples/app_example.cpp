@@ -1,6 +1,6 @@
 /*
  * @file app_example.cpp
- * @brief Example application using the Crux application framework
+ * @brief Example application using the Base application framework
  *
  * Copyright (c) 2025 Gobind Prasad <gobdeveloper@gmail.com>
  * SPDX-License-Identifier: MIT
@@ -10,7 +10,7 @@
 #include <iostream>
 #include <chrono>
 
-using namespace crux;
+using namespace base;
 
 /**
  * @brief Example HTTP server component
@@ -239,7 +239,7 @@ private:
         ApplicationConfig config;
         config.name = "ExampleApp";
         config.version = "1.0.0";
-        config.description = "Example application demonstrating the Crux framework";
+        config.description = "Example application demonstrating the Base framework";
         config.worker_threads = 2;
         config.enable_health_check = true;
         config.health_check_interval = std::chrono::milliseconds(5000);
@@ -283,4 +283,4 @@ private:
 };
 
 // Use the convenience macro to create main function
-CRUX_APPLICATION_MAIN(ExampleApplication)
+BASE_APPLICATION_MAIN(ExampleApplication)

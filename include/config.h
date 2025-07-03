@@ -21,7 +21,7 @@
 #include <shared_mutex>
 #include <source_location>
 
-namespace crux {
+namespace base {
 
 /**
  * @brief Configuration section for logging settings
@@ -41,7 +41,7 @@ struct LoggingConfig {
  * @brief Configuration section for application settings
  */
 struct AppConfig {
-    std::string name = "crux_app";           ///< Application name
+    std::string name = "base_app";           ///< Application name
     std::string version = "1.0.0";          ///< Application version
     std::string description;                 ///< Application description
     bool debug_mode = false;                 ///< Debug mode flag
@@ -269,4 +269,4 @@ T ConfigManager::get_value_or(std::string_view key, const T& default_value, std:
     return value.value_or(default_value);
 }
 
-} // namespace crux
+} // namespace base

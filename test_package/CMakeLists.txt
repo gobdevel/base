@@ -5,7 +5,7 @@ project(PackageTest CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-find_package(crux CONFIG REQUIRED)
+find_package(base CONFIG REQUIRED)
 
 add_executable(example src/example.cpp)
-target_link_libraries(example crux::crux)
+target_link_libraries(example base::base)

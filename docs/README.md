@@ -1,6 +1,6 @@
-# Crux Framework Documentation
+# Base Framework Documentation
 
-This directory contains detailed documentation for each component of the Crux framework.
+This directory contains detailed documentation for each component of the Base framework.
 
 ## Component Documentation
 
@@ -115,4 +115,4 @@ When contributing to the framework:
 
 ---
 
-_Last updated: Documentation reflects the current state of the Crux framework with full C++20 modernization and messaging system integration._
+_Last updated: Documentation reflects the current state of the Base framework with full C++20 modernization and messaging system integration._

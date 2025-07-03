@@ -9,9 +9,9 @@
 #include "messaging.h"
 #include "logger.h"
 
-namespace crux {
+namespace base {
 
 // Implementation details are mostly header-only for template instantiation
 // This file exists for potential future non-template implementations
 
-} // namespace crux
+} // namespace base

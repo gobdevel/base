@@ -20,7 +20,7 @@
 #include <numeric>
 #include <algorithm>
 
-using namespace crux;
+using namespace base;
 
 class SimpleBenchmark {
 private:
@@ -91,7 +91,7 @@ public:
 
         // Message queue throughput
         {
-            MessageQueue queue;
+            EventDrivenMessageQueue queue;
             struct TestMsg { int id; std::string data; };
 
             auto result = measure("Message Queue", 5000, [&queue](size_t i) {
@@ -103,15 +103,15 @@ public:
             results_.push_back(result);
         }
 
-        // Lock-free messaging test (same scope as ThreadMsg)
+        // High-performance messaging test (same scope as ThreadMsg)
         {
             struct ThreadMsg { size_t id; };
-            LockFreeMessageQueue<ThreadMsg> lockfree_queue;
+            EventDrivenMessageQueue hp_queue;
             const size_t msg_count = 100000;
 
-            auto result = measure("Lock-Free Queue", msg_count, [&lockfree_queue](size_t i) {
-                lockfree_queue.send(ThreadMsg{i});
-                auto msg = lockfree_queue.try_receive();
+            auto result = measure("Event-Driven Queue", msg_count, [&hp_queue](size_t i) {
+                hp_queue.send(ThreadMsg{i});
+                auto msg = hp_queue.receive(std::chrono::milliseconds(1));
                 volatile auto* ptr = msg.get();
                 (void)ptr;
             });
@@ -326,7 +326,7 @@ public:
                 std::chrono::high_resolution_clock::time_point timestamp;
             };
 
-            MessageQueue direct_queue;
+            EventDrivenMessageQueue direct_queue;
             std::vector<double> minimal_latencies;
             const size_t test_count = 1000;
 
@@ -334,7 +334,7 @@ public:
                 auto send_time = std::chrono::high_resolution_clock::now();
                 direct_queue.send(SimpleMsg{i, send_time});
 
-                auto msg = direct_queue.try_receive();
+                auto msg = direct_queue.receive(std::chrono::milliseconds(1));
                 if (msg) {
                     auto receive_time = std::chrono::high_resolution_clock::now();
                     if (auto* typed_msg = dynamic_cast<Message<SimpleMsg>*>(msg.get())) {
@@ -712,7 +712,7 @@ port = 5432
     }
 
     void run_all() {
-        std::cout << "Crux Framework Simple Benchmark Suite" << std::endl;
+        std::cout << "Base Framework Simple Benchmark Suite" << std::endl;
         std::cout << "=====================================" << std::endl;
 
         benchmark_logger();

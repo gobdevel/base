@@ -2,14 +2,14 @@
  * @file color_test.cpp
  * @brief Test program to de    // Test 3: Logger with colors disabled (for comparison)
     std::cout << "\nTest 3: Logger with colors disabled (for comparison)" << std::endl;
-    crux::Logger::shutdown();  // Clean up previous logger
-    crux::LoggerConfig config_no_colors{
+    base::Logger::shutdown();  // Clean up previous logger
+    base::LoggerConfig config_no_colors{
         .app_name = "no_color_test",
         .enable_console = true,
         .enable_colors = false,
         .pattern = "[%H:%M:%S] [%n] [%l] %v"  // Regular pattern without color markers
     };
-    crux::Logger::init(config_no_colors); colored logging
+    base::Logger::init(config_no_colors); colored logging
  *
  * Copyright (c) 2025 Gobind Prasad <gobdeveloper@gmail.com>
  * SPDX-License-Identifier: MIT
@@ -37,58 +37,58 @@ int main() {
 
     // Test 1: Default logger with colors enabled
     std::cout << "\nTest 1: Default logger (colors should be enabled)" << std::endl;
-    crux::Logger::init();
+    base::Logger::init();
 
-    crux::Logger::trace("This is a TRACE message (usually not shown by default)");
-    crux::Logger::debug("This is a DEBUG message (usually not shown by default)");
-    crux::Logger::info("This is an INFO message - should be GREEN");
-    crux::Logger::warn("This is a WARNING message - should be YELLOW");
-    crux::Logger::error("This is an ERROR message - should be RED");
-    crux::Logger::critical("This is a CRITICAL message - should be BRIGHT RED");
+    base::Logger::trace("This is a TRACE message (usually not shown by default)");
+    base::Logger::debug("This is a DEBUG message (usually not shown by default)");
+    base::Logger::info("This is an INFO message - should be GREEN");
+    base::Logger::warn("This is a WARNING message - should be YELLOW");
+    base::Logger::error("This is an ERROR message - should be RED");
+    base::Logger::critical("This is a CRITICAL message - should be BRIGHT RED");
 
     // Test 2: Logger with colors explicitly enabled
     std::cout << "\nTest 2: Logger with colors explicitly enabled" << std::endl;
-    crux::Logger::shutdown();  // Clean up previous logger
-    crux::LoggerConfig config_with_colors{
+    base::Logger::shutdown();  // Clean up previous logger
+    base::LoggerConfig config_with_colors{
         .app_name = "color_test",
         .enable_console = true,
         .enable_colors = true,
         .pattern = "[%H:%M:%S] [%n] [%^%l%$] %v"  // %^%l%$ ensures colored level
     };
-    crux::Logger::init(config_with_colors);
+    base::Logger::init(config_with_colors);
 
-    crux::Logger::info("INFO with explicit color config");
-    crux::Logger::warn("WARNING with explicit color config");
-    crux::Logger::error("ERROR with explicit color config");
-    crux::Logger::critical("CRITICAL with explicit color config");
+    base::Logger::info("INFO with explicit color config");
+    base::Logger::warn("WARNING with explicit color config");
+    base::Logger::error("ERROR with explicit color config");
+    base::Logger::critical("CRITICAL with explicit color config");
 
     // Test 3: Logger with colors disabled
     std::cout << "\nTest 3: Logger with colors disabled (for comparison)" << std::endl;
-    crux::LoggerConfig config_no_colors{
+    base::LoggerConfig config_no_colors{
         .app_name = "no_color_test",
         .enable_console = true,
         .enable_colors = false,
         .pattern = "[%H:%M:%S] [%n] [%l] %v"  // Regular pattern without color markers
     };
-    crux::Logger::init(config_no_colors);
+    base::Logger::init(config_no_colors);
 
-    crux::Logger::info("INFO without colors");
-    crux::Logger::warn("WARNING without colors");
-    crux::Logger::error("ERROR without colors");
-    crux::Logger::critical("CRITICAL without colors");
+    base::Logger::info("INFO without colors");
+    base::Logger::warn("WARNING without colors");
+    base::Logger::error("ERROR without colors");
+    base::Logger::critical("CRITICAL without colors");
 
     // Test 4: Enable all log levels and test colors
     std::cout << "\nTest 4: All log levels with colors enabled" << std::endl;
-    crux::Logger::shutdown();  // Clean up previous logger
-    crux::Logger::init(config_with_colors);
-    crux::Logger::set_level(crux::LogLevel::Trace);  // Show all levels
+    base::Logger::shutdown();  // Clean up previous logger
+    base::Logger::init(config_with_colors);
+    base::Logger::set_level(base::LogLevel::Trace);  // Show all levels
 
-    crux::Logger::trace("TRACE level message");
-    crux::Logger::debug("DEBUG level message");
-    crux::Logger::info("INFO level message");
-    crux::Logger::warn("WARNING level message");
-    crux::Logger::error("ERROR level message");
-    crux::Logger::critical("CRITICAL level message");
+    base::Logger::trace("TRACE level message");
+    base::Logger::debug("DEBUG level message");
+    base::Logger::info("INFO level message");
+    base::Logger::warn("WARNING level message");
+    base::Logger::error("ERROR level message");
+    base::Logger::critical("CRITICAL level message");
 
     std::cout << "\n=== Color Test Complete ===" << std::endl;
     std::cout << "Expected colors:" << std::endl;

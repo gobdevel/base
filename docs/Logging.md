@@ -2,7 +2,7 @@
 
 ## Overview
 
-The crux logger system provides a modern C++20 thread-safe logging wrapper for spdlog with enhanced features including automatic source location, colored console output, structured logging, and seamless configuration integration.
+The base logger system provides a modern C++20 thread-safe logging wrapper for spdlog with enhanced features including automatic source location, colored console output, structured logging, and seamless configuration integration.
 
 ## Features
 
@@ -30,7 +30,7 @@ The crux logger system provides a modern C++20 thread-safe logging wrapper for s
 
 ```cpp
 #include "logger.h"
-using namespace crux;
+using namespace base;
 
 int main() {
     // Initialize with default console logging
@@ -50,7 +50,7 @@ int main() {
 
 ```cpp
 #include "logger.h"
-using namespace crux;
+using namespace base;
 
 int main() {
     // Configure logger with custom settings
@@ -123,7 +123,7 @@ if (Logger::is_initialized()) {
 
 ```cpp
 struct LoggerConfig {
-    std::string app_name = "crux";                           // Logger name
+    std::string app_name = "base";                           // Logger name
     std::filesystem::path log_file{};                        // Optional log file
     std::size_t max_file_size = 5 * 1024 * 1024;           // 5MB file size limit
     std::size_t max_files = 3;                              // Number of rotating files
@@ -427,7 +427,7 @@ int main() {
 ### Running Logger Tests
 
 ```bash
-cd build/Release && ./tests/test_crux
+cd build/Release && ./tests/test_base
 ```
 
 The test suite covers:
@@ -591,13 +591,13 @@ Logger::debug("Processing item {}", item_id);
 ```cpp
 // From spdlog directly
 spdlog::info("Message: {}", value);
-// To crux::Logger
+// To base::Logger
 Logger::info("Message: {}", value);
 
 // From other libraries
 LOG(INFO) << "Message: " << value;
-// To crux::Logger
+// To base::Logger
 Logger::info("Message: {}", value);
 ```
 
-The crux logger system provides a modern, efficient, and feature-rich logging solution that scales from simple console output to complex production logging scenarios with multiple sinks, rotation, and configuration management.
+The base logger system provides a modern, efficient, and feature-rich logging solution that scales from simple console output to complex production logging scenarios with multiple sinks, rotation, and configuration management.

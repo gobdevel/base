@@ -13,7 +13,7 @@
 #include <memory>
 #include <atomic>
 
-using namespace crux;
+using namespace base;
 
 // Test class for basic functionality tests
 class BasicTestClass {

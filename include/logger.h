@@ -16,7 +16,7 @@
 #include <memory>
 #include <filesystem>
 
-namespace crux {
+namespace base {
 
 /**
  * @brief Log level enumeration for type-safe level specification.
@@ -53,7 +53,7 @@ enum class LogLevel : int {
  * @brief Configuration structure for logger initialization.
  */
 struct LoggerConfig {
-    std::string app_name = "crux";
+    std::string app_name = "base";
     std::filesystem::path log_file{};
     std::size_t max_file_size = 5 * 1024 * 1024;  // 5MB
     std::size_t max_files = 3;
@@ -226,4 +226,4 @@ private:
     static LogLevel from_spdlog_level(spdlog::level::level_enum level) noexcept;
 };
 
-} // namespace crux
+} // namespace base

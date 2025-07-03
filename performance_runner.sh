@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Simple Performance Test Runner for Crux Framework
+# Simple Performance Test Runner for Base Framework
 # This script uses the existing test suite to run performance benchmarks
 
 set -e
@@ -37,7 +37,7 @@ run_existing_performance_tests() {
 
     cd "$PROJECT_ROOT"
 
-    if [ ! -f "build/Release/tests/test_crux" ]; then
+    if [ ! -f "build/Release/tests/test_base" ]; then
         log_error "Test executable not found. Please build the project first:"
         echo "  cmake --build build/Release"
         exit 1
@@ -45,13 +45,13 @@ run_existing_performance_tests() {
 
     echo ""
     echo "========================================"
-    echo "CRUX FRAMEWORK PERFORMANCE TESTS"
+    echo "BASE FRAMEWORK PERFORMANCE TESTS"
     echo "========================================"
     echo ""
 
     # Run performance-related tests
     log_info "Running messaging performance tests..."
-    ./build/Release/tests/test_crux --gtest_filter="*Performance*" || log_warning "Some performance tests may have failed"
+    ./build/Release/tests/test_base --gtest_filter="*Performance*" || log_warning "Some performance tests may have failed"
 
     echo ""
     log_success "Performance tests completed"
@@ -103,7 +103,7 @@ run_messaging_stress_test() {
 
     for i in {1..5}; do
         log_info "Stress test iteration $i/5"
-        ./build/Release/tests/test_crux --gtest_filter="*MessagingPerformance*" --gtest_repeat=1
+        ./build/Release/tests/test_base --gtest_filter="*MessagingPerformance*" --gtest_repeat=1
         echo ""
         sleep 2
     done
@@ -230,7 +230,7 @@ measure_build_performance() {
 
 # Main menu function
 show_menu() {
-    echo "Crux Framework Performance Testing"
+    echo "Base Framework Performance Testing"
     echo ""
     echo "Available tests:"
     echo "1. Quick performance tests (existing test suite)"
@@ -328,7 +328,7 @@ main() {
                 run_messaging_stress_test
                 ;;
             "help"|"h"|*)
-                echo "Crux Framework Performance Test Runner"
+                echo "Base Framework Performance Test Runner"
                 echo ""
                 echo "Usage: $0 [command]"
                 echo ""

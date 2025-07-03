@@ -1,9 +1,9 @@
 /*
  * @file simple_performance_test.cpp
- * @brief Simple performance testing example for Crux framework
+ * @brief Simple performance testing example for Base framework
  *
  * This demonstrates how to quickly measure performance of your applications
- * using the Crux framework's built-in capabilities.
+ * using the Base framework's built-in capabilities.
  *
  * Copyright (c) 2025 Gobind Prasad <gobdeveloper@gmail.com>
  * SPDX-License-Identifier: MIT
@@ -17,7 +17,7 @@
 #include <iostream>
 #include <atomic>
 
-using namespace crux;
+using namespace base;
 
 // Simple performance measurement utility
 class PerformanceTimer {
@@ -244,7 +244,7 @@ void benchmark_function(const std::string& name, int iterations, Func&& func) {
 
 int main() {
     try {
-        std::cout << "Crux Framework - Simple Performance Testing Example" << std::endl;
+        std::cout << "Base Framework - Simple Performance Testing Example" << std::endl;
         std::cout << "=================================================" << std::endl;
 
         // Test different components

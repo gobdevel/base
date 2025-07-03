@@ -12,7 +12,7 @@
 #include <thread>
 #include <chrono>
 
-using namespace crux;
+using namespace base;
 
 void demonstrate_basic_logging() {
     std::cout << "\n=== Basic Logging Demo ===" << std::endl;

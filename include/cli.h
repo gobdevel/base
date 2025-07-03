@@ -1,6 +1,6 @@
 /*
  * @file cli.h
- * @brief Runtime inspection and debugging CLI for Crux applications
+ * @brief Runtime inspection and debugging CLI for Base applications
  *
  * Provides a command-line interface for inspecting and debugging application
  * internals including thread status, message queues, configuration, health,
@@ -29,7 +29,7 @@
 #include <iostream>
 #include <future>
 
-namespace crux {
+namespace base {
 
 // Forward declarations
 class Application;
@@ -298,4 +298,4 @@ private:
     CLIResult execute_with_timeout(std::function<CLIResult()> func, std::chrono::milliseconds timeout);
 };
 
-} // namespace crux
+} // namespace base

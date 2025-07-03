@@ -15,7 +15,7 @@
 #include <random>
 #include <iostream>
 
-using namespace crux;
+using namespace base;
 
 // Define message types for our example microservice
 struct OrderMessage {

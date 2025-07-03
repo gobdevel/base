@@ -10,7 +10,7 @@
 
 #include "logger.h"
 #include "config.h"
-#include "singleton.h"
+#include "cli.h"
 #include "messaging.h"
 
 #include <asio.hpp>
@@ -27,7 +27,7 @@
 #include <future>
 #include <exception>
 
-namespace crux {
+namespace base {
 
 // Forward declarations
 struct CLIConfig;
@@ -50,9 +50,9 @@ enum class ApplicationState {
  * @brief Application configuration structure
  */
 struct ApplicationConfig {
-    std::string name = "crux_app";
+    std::string name = "base_app";
     std::string version = "1.0.0";
-    std::string description = "Crux Application";
+    std::string description = "Base Application";
 
     // Threading configuration
     std::size_t worker_threads = std::thread::hardware_concurrency();
@@ -70,8 +70,12 @@ struct ApplicationConfig {
     std::chrono::milliseconds health_check_interval = std::chrono::milliseconds(5000);
 
     // Configuration file
-    std::string config_file = "app.toml";
+    std::string config_file = "";  // No default config file
     std::string config_app_name = "default";
+
+    // Performance tuning
+    std::chrono::microseconds message_processing_interval = std::chrono::microseconds(1000);
+    bool enable_low_latency_mode = true;
 
     // CLI configuration
     bool enable_cli = false;
@@ -82,13 +86,16 @@ struct ApplicationConfig {
 };
 
 /**
- * @brief Task priority levels for the application
+ * @brief Task execution priority levels for scheduling optimization
+ *
+ * Priority determines WHEN a task executes, not exception handling strategy.
+ * All priorities maintain full exception safety for application reliability.
  */
 enum class TaskPriority {
-    Low = 0,
-    Normal = 1,
-    High = 2,
-    Critical = 3
+    Low = 0,        ///< Low priority: Queued execution, explicit low importance
+    Normal = 1,     ///< Normal priority: Queued execution, default for most tasks
+    High = 2,       ///< High priority: Immediate dispatch, time-sensitive operations
+    Critical = 3    ///< Critical priority: Immediate dispatch, highest urgency
 };
 
 /**
@@ -227,9 +234,28 @@ public:
     asio::any_io_executor executor() noexcept { return io_context_.get_executor(); }
 
     /**
-     * @brief Post a task to the event loop
+     * @brief Post a task to the event loop with priority-based scheduling optimization
      * @param task Task function to execute
-     * @param priority Task priority (default: Normal)
+     * @param priority Task execution priority:
+     *                 - Critical: Immediate execution using dispatch (highest priority)
+     *                 - High: Immediate execution using dispatch (high priority)
+     *                 - Normal: Queued execution using post (default, balanced)
+     *                 - Low: Queued execution using post (explicitly lower priority)
+     *
+     * @note All priorities maintain full exception safety for application stability.
+     *       Priority affects WHEN a task executes, not HOW safely it executes.
+     *       - dispatch: Executes immediately if called from event loop, otherwise queues
+     *       - post: Always queues for execution in event loop order
+     *
+     * @example
+     * // Safe execution with default priority
+     * app.post_task([]{ do_work(); });
+     *
+     * // High-priority execution (immediate dispatch)
+     * app.post_task([]{ urgent_work(); }, TaskPriority::High);
+     *
+     * // Critical priority for time-sensitive operations
+     * app.post_task([]{ real_time_processing(); }, TaskPriority::Critical);
      */
     void post_task(TaskFunction task, TaskPriority priority = TaskPriority::Normal);
 
@@ -340,6 +366,8 @@ public:
 
         /**
          * @brief Post a task to this thread's event loop
+         * @param task Task function to execute with automatic exception handling
+         * @note Always provides exception safety for reliable operation
          */
         void post_task(std::function<void()> task);
 
@@ -491,7 +519,7 @@ public:
          * @brief Get current queue size
          */
         std::size_t queue_size() const {
-            return messaging_context_ ? messaging_context_->queue_size() : 0;
+            return messaging_context_ ? messaging_context_->pending_message_count() : 0;
         }
 
     private:
@@ -503,7 +531,7 @@ public:
         std::thread thread_;
         asio::io_context io_context_;
         std::unique_ptr<asio::executor_work_guard<asio::io_context::executor_type>> work_guard_;
-        std::unique_ptr<EventDrivenThreadMessagingContext> messaging_context_;
+        std::unique_ptr<ThreadMessagingContext> messaging_context_;
     };
 
     /**
@@ -516,9 +544,12 @@ public:
                                                 ManagedThread::ThreadFunction thread_func);
 
     /**
-     * @brief Create a simple worker thread with automatic task handling
+     * @brief Create a simple worker thread (convenience method)
      * @param name Thread name for logging/debugging
      * @return Shared pointer to managed thread
+     *
+     * @note This is equivalent to create_thread(name, [](asio::io_context&){})
+     *       Use create_thread() directly if you need custom initialization
      */
     std::shared_ptr<ManagedThread> create_worker_thread(std::string name);
 
@@ -717,7 +748,7 @@ private:
 /**
  * @brief Helper macro to create main function for an application
  */
-#define CRUX_APPLICATION_MAIN(AppClass) \
+#define BASE_APPLICATION_MAIN(AppClass) \
 int main(int argc, char* argv[]) { \
     try { \
         AppClass app; \
@@ -731,4 +762,4 @@ int main(int argc, char* argv[]) { \
     } \
 }
 
-} // namespace crux
+} // namespace base

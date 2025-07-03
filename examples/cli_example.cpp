@@ -1,6 +1,6 @@
 /*
  * @file cli_example.cpp
- * @brief Example demonstrating the Crux CLI feature for runtime inspection and debugging
+ * @brief Example demonstrating the Base CLI feature for runtime inspection and debugging
  *
  * This example shows how to:
  * 1. Enable CLI with both stdin and TCP interfaces
@@ -21,7 +21,7 @@
 #include <thread>
 #include <iostream>
 
-using namespace crux;
+using namespace base;
 
 /**
  * @brief Example application with CLI features
@@ -36,7 +36,7 @@ public:
     CLIExampleApp() : Application({
         .name = "CLI Example App",
         .version = "1.0.0",
-        .description = "Demonstration of Crux CLI features",
+        .description = "Demonstration of Base CLI features",
         .worker_threads = 2,
         .enable_health_check = true,
         .health_check_interval = std::chrono::milliseconds(2000),
@@ -185,7 +185,7 @@ int main() {
 
         CLIExampleApp app;
 
-        std::cout << "\n=== Crux CLI Example ===\n";
+        std::cout << "\n=== Base CLI Example ===\n";
         std::cout << "The application will start with CLI enabled.\n";
         std::cout << "You can interact with it using:\n";
         std::cout << "1. Direct stdin commands (type here)\n";

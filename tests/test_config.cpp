@@ -13,7 +13,7 @@
 #include <thread>
 #include <chrono>
 
-using namespace crux;
+using namespace base;
 
 class ConfigTest : public ::testing::Test {
 protected:
@@ -257,7 +257,7 @@ TEST_F(ConfigTest, DefaultConfigurations) {
 
     // Get configs for non-existent app should return defaults
     auto app_config = config.get_app_config("nonexistent");
-    EXPECT_EQ(app_config.name, "crux_app");
+    EXPECT_EQ(app_config.name, "base_app");
     EXPECT_EQ(app_config.version, "1.0.0");
     EXPECT_FALSE(app_config.debug_mode);
 
@@ -370,7 +370,7 @@ TEST_F(ConfigTest, EdgeCases) {
     // Empty TOML content
     EXPECT_TRUE(config.load_from_string("", "empty"));
     auto empty_config = config.get_app_config("empty");
-    EXPECT_EQ(empty_config.name, "crux_app"); // Should return defaults
+    EXPECT_EQ(empty_config.name, "base_app"); // Should return defaults
 
     // TOML with only comments
     EXPECT_TRUE(config.load_from_string("# This is just a comment", "comment_only"));

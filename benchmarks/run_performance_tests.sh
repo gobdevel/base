@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Crux Framework Performance Test Runner
+# Base Framework Performance Test Runner
 # This script automates performance testing and comparison
 
 set -e
@@ -97,8 +97,8 @@ run_existing_tests() {
     log_info "Running existing performance tests..."
 
     cd "$PROJECT_ROOT"
-    if [ -f "build/Release/tests/test_crux" ]; then
-        ./build/Release/tests/test_crux --gtest_filter="*Performance*" > "$RESULTS_DIR/existing_performance_tests.log" 2>&1
+    if [ -f "build/Release/tests/test_base" ]; then
+        ./build/Release/tests/test_base --gtest_filter="*Performance*" > "$RESULTS_DIR/existing_performance_tests.log" 2>&1
         log_success "Existing performance tests completed"
     else
         log_warning "Main test suite not found. Run 'cmake --build build/Release' first"
@@ -280,7 +280,7 @@ main() {
             compare_with_baseline "$BUILD_DIR/benchmark_results.csv"
             ;;
         "help"|*)
-            echo "Crux Framework Performance Test Runner"
+            echo "Base Framework Performance Test Runner"
             echo ""
             echo "Usage: $0 <command> [options]"
             echo ""

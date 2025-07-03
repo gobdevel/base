@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(CruxBenchmarks)
+project(BaseBenchmarks)
 
 # Set C++20 standard
 set(CMAKE_CXX_STANDARD 20)
@@ -17,7 +17,7 @@ find_package(Threads REQUIRED)
 message(STATUS "Benchmark runner source ready in ${CMAKE_CURRENT_SOURCE_DIR}")
 message(STATUS "To build manually:")
 message(STATUS "cd ${CMAKE_CURRENT_SOURCE_DIR}/../build/Release")
-message(STATUS "clang++ -std=c++20 -O3 -I../include -L. -lcrux ../benchmarks/benchmark_runner.cpp -o benchmark_runner")
+message(STATUS "clang++ -std=c++20 -O3 -I../include -L. -lbase ../benchmarks/benchmark_runner.cpp -o benchmark_runner")
 
 # Create a simple target that shows instructions
 add_custom_target(benchmark_instructions
@@ -30,7 +30,7 @@ add_custom_target(benchmark_instructions
     COMMAND ${CMAKE_COMMAND} -E echo "   cd ../build/Release"
     COMMAND ${CMAKE_COMMAND} -E echo "   clang++ -std=c++20 -O3 -DNDEBUG \\"
     COMMAND ${CMAKE_COMMAND} -E echo "           -I../../include \\"
-    COMMAND ${CMAKE_COMMAND} -E echo "           -L. -lcrux \\"
+    COMMAND ${CMAKE_COMMAND} -E echo "           -L. -lbase \\"
     COMMAND ${CMAKE_COMMAND} -E echo "           ../../benchmarks/benchmark_runner.cpp \\"
     COMMAND ${CMAKE_COMMAND} -E echo "           -o benchmark_runner"
     COMMAND ${CMAKE_COMMAND} -E echo ""
@@ -83,4 +83,4 @@ add_custom_target(bench_memory
 )
 
 # Documentation
-install(FILES README.md DESTINATION share/doc/crux-benchmarks)
+install(FILES README.md DESTINATION share/doc/base-benchmarks)

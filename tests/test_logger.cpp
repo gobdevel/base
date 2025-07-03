@@ -14,61 +14,61 @@ class LoggerTest : public ::testing::Test {
 protected:
     void SetUp() override {
         // Shutdown any existing logger before initializing a new one
-        crux::Logger::shutdown();
-        crux::Logger::init();
+        base::Logger::shutdown();
+        base::Logger::init();
     }
 
     void TearDown() override {
         // Clean up after each test
-        crux::Logger::shutdown();
+        base::Logger::shutdown();
     }
 };
 
 TEST_F(LoggerTest, InfoLog) {
-    crux::Logger::info("This is an info message");
+    base::Logger::info("This is an info message");
 }
 
 TEST_F(LoggerTest, WarnLog) {
-    crux::Logger::warn("This is a warning message");
+    base::Logger::warn("This is a warning message");
 }
 
 TEST_F(LoggerTest, ErrorLog) {
-    crux::Logger::error("This is an error message");
+    base::Logger::error("This is an error message");
 }
 
 // Test modern C++20 logger features
 TEST_F(LoggerTest, ModernLoggerFeatures) {
     // Shutdown the default logger and init with custom config
-    crux::Logger::shutdown();
+    base::Logger::shutdown();
 
     // Test with LoggerConfig
-    crux::LoggerConfig config{
+    base::LoggerConfig config{
         .app_name = "test_app",
-        .level = crux::LogLevel::Debug,
+        .level = base::LogLevel::Debug,
         .enable_console = true,
         .enable_file = false
     };
 
-    crux::Logger::init(config);
+    base::Logger::init(config);
 
     // Test type-safe log levels
-    crux::Logger::set_level(crux::LogLevel::Info);
-    EXPECT_EQ(crux::Logger::get_level(), crux::LogLevel::Info);
+    base::Logger::set_level(base::LogLevel::Info);
+    EXPECT_EQ(base::Logger::get_level(), base::LogLevel::Info);
 
     // Test modern logging with source location
-    crux::Logger::info("Modern logging test");
-    crux::Logger::warn("Warning with value: {}", 42);
-    crux::Logger::error("Error occurred");
+    base::Logger::info("Modern logging test");
+    base::Logger::warn("Warning with value: {}", 42);
+    base::Logger::error("Error occurred");
 
-    EXPECT_TRUE(crux::Logger::is_initialized());
+    EXPECT_TRUE(base::Logger::is_initialized());
 
     // Cleanup
-    crux::Logger::shutdown();
-    EXPECT_FALSE(crux::Logger::is_initialized());
+    base::Logger::shutdown();
+    EXPECT_FALSE(base::Logger::is_initialized());
 }
 
 TEST_F(LoggerTest, StructuredLogging) {
     // Test with various types (logger already initialized in SetUp)
-    crux::Logger::info("String: {}, Int: {}, Float: {:.2f}", "test", 123, 3.14159);
-    crux::Logger::debug("Debug message with boolean: {}", true);
+    base::Logger::info("String: {}, Int: {}, Float: {:.2f}", "test", 123, 3.14159);
+    base::Logger::debug("Debug message with boolean: {}", true);
 }

@@ -12,8 +12,8 @@ from conan import ConanFile
 from conan.tools.cmake import CMakeToolchain, CMake, cmake_layout, CMakeDeps
 
 
-class cruxRecipe(ConanFile):
-    name = "crux"
+class baseRecipe(ConanFile):
+    name = "base"
     version = "1.0"
     package_type = "library"
 
@@ -65,11 +65,11 @@ class cruxRecipe(ConanFile):
 
         if not self.conf.get("tools.build:skip_test", default=False):
             test_folder = os.path.join("tests")
-            self.run(os.path.join(test_folder, "test_crux"))
+            self.run(os.path.join(test_folder, "test_base"))
 
     def package(self):
         cmake = CMake(self)
         cmake.install()
 
     def package_info(self):
-        self.cpp_info.libs = ["crux"]
+        self.cpp_info.libs = ["base"]

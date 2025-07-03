@@ -2,7 +2,7 @@
 
 ## Overview
 
-The crux configuration system provides a comprehensive, type-safe, and thread-safe configuration management solution using TOML files. It supports per-application configuration, automatic logger integration, and flexible value retrieval with defaults.
+The base configuration system provides a comprehensive, type-safe, and thread-safe configuration management solution using TOML files. It supports per-application configuration, automatic logger integration, and flexible value retrieval with defaults.
 
 ## Features
 
@@ -23,7 +23,7 @@ The crux configuration system provides a comprehensive, type-safe, and thread-sa
 
 ```cpp
 struct AppConfig {
-    std::string name = "crux_app";
+    std::string name = "base_app";
     std::string version = "1.0.0";
     std::string description;
     bool debug_mode = false;
@@ -67,7 +67,7 @@ struct NetworkConfig {
 
 ```cpp
 #include "config.h"
-using namespace crux;
+using namespace base;
 
 // Get the configuration manager instance
 auto& config = ConfigManager::instance();

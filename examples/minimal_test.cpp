@@ -7,7 +7,7 @@
 #include "logger.h"
 #include <iostream>
 
-using namespace crux;
+using namespace base;
 
 class MinimalApp : public Application {
 public:

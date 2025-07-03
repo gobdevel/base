@@ -11,7 +11,7 @@
 #include <chrono>
 #include <atomic>
 
-using namespace crux;
+using namespace base;
 
 int main() {
     std::cout << "Testing Event-Driven Messaging System" << std::endl;

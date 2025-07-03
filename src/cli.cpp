@@ -22,7 +22,7 @@
 #include <chrono>
 #include <regex>
 
-namespace crux {
+namespace base {
 
 CLI::CLI() {
     Logger::debug("CLI created");
@@ -319,7 +319,7 @@ void CLI::start_tcp_server() {
 
 void CLI::handle_tcp_client(std::shared_ptr<asio::ip::tcp::socket> socket) {
     try {
-        std::string welcome = "Crux CLI v1.0 - Type 'help' for commands\n";
+        std::string welcome = "Base CLI v1.0 - Type 'help' for commands\n";
         asio::write(*socket, asio::buffer(welcome));
 
         asio::streambuf buffer;
@@ -687,4 +687,4 @@ std::string CLI::format_bytes(std::size_t bytes) const {
     return oss.str();
 }
 
-} // namespace crux
+} // namespace base
