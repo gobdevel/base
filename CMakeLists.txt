@@ -10,14 +10,30 @@ find_package(spdlog REQUIRED)
 find_package(tomlplusplus REQUIRED)
 find_package(asio REQUIRED)
 
+# Include Conan dependencies
+include(${CMAKE_BINARY_DIR}/generators/conandeps_legacy.cmake)
+
 add_library(base
     src/logger.cpp
     src/config.cpp
     src/application.cpp
     src/messaging.cpp
     src/cli.cpp
+    src/tables.cpp
 )
 target_include_directories(base PUBLIC include)
+
+# Add nlohmann_json include directory (header-only library)
+find_path(NLOHMANN_JSON_INCLUDE_DIR
+    NAMES nlohmann/json.hpp
+    PATHS /Users/gobindp/.conan2/p/*/p/include
+    NO_DEFAULT_PATH
+)
+if(NLOHMANN_JSON_INCLUDE_DIR)
+    target_include_directories(base PRIVATE ${NLOHMANN_JSON_INCLUDE_DIR})
+else()
+    message(FATAL_ERROR "nlohmann/json.hpp not found")
+endif()
 
 # Add examples subdirectory only if it exists (not needed for Conan packages)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists.txt")
@@ -41,5 +57,5 @@ target_link_libraries(base
     asio::asio
 )
 
-set_target_properties(base PROPERTIES PUBLIC_HEADER "include/logger.h;include/config.h;include/singleton.h;include/application.h;include/messaging.h;include/cli.h")
+set_target_properties(base PROPERTIES PUBLIC_HEADER "include/logger.h;include/config.h;include/singleton.h;include/application.h;include/messaging.h;include/cli.h;include/tables.h")
 install(TARGETS base)

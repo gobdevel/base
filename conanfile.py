@@ -46,6 +46,7 @@ class baseRecipe(ConanFile):
         self.requires(
             "asio/1.34.2", transitive_headers=True
         )  # Standalone ASIO (header-only)
+        self.requires("nlohmann_json/3.11.3", transitive_headers=True)
         self.test_requires("gtest/1.16.0")
 
     def layout(self):

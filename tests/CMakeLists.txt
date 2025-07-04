@@ -10,5 +10,6 @@ add_executable(test_base
     test_application.cpp
     test_messaging.cpp
     test_cli.cpp
+    test_tables.cpp
 )
 target_link_libraries(test_base GTest::gtest GTest::gtest_main base)

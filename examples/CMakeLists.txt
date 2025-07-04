@@ -27,6 +27,14 @@ target_link_libraries(messaging_example base)
 add_executable(cli_example cli_example.cpp)
 target_link_libraries(cli_example base)
 
+# Table system demonstration
+add_executable(table_example table_example.cpp)
+target_link_libraries(table_example base)
+
+# Table dump/print API demonstration
+add_executable(table_dump_example table_dump_example.cpp)
+target_link_libraries(table_dump_example base)
+
 # Set output directory for all examples
 set_target_properties(
     app_example
@@ -34,6 +42,8 @@ set_target_properties(
     logger_config_demo
     messaging_example
     cli_example
+    table_example
+    table_dump_example
     PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
 )
@@ -45,6 +55,8 @@ set_target_properties(
     logger_config_demo
     messaging_example
     cli_example
+    table_example
+    table_dump_example
     PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
