@@ -19,13 +19,17 @@ add_library(base
 )
 target_include_directories(base PUBLIC include)
 
-# Add examples subdirectory
-add_subdirectory(examples)
+# Add examples subdirectory only if it exists (not needed for Conan packages)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists.txt")
+    add_subdirectory(examples)
+endif()
 
-# Add benchmark executable
-add_executable(simple_benchmark benchmarks/simple_benchmark.cpp)
-target_link_libraries(simple_benchmark base)
-set_target_properties(simple_benchmark PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks")
+# Add benchmark executable only if benchmarks directory exists
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks")
+    add_executable(simple_benchmark benchmarks/simple_benchmark.cpp)
+    target_link_libraries(simple_benchmark base)
+    set_target_properties(simple_benchmark PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks")
+endif()
 
 if (NOT BUILD_TESTING STREQUAL OFF)
     add_subdirectory(tests)
