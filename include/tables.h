@@ -109,6 +109,35 @@ using CellValue = std::variant<
 >;
 
 /**
+ * @brief print CellValue to output stream
+ */
+inline std::ostream& operator<<(std::ostream& os, const CellValue& value) {
+    std::visit([&os](const auto& v) {
+        using T = std::decay_t<decltype(v)>;
+
+        if constexpr (std::is_same_v<T, std::monostate>) {
+            os << "null";
+        } else if constexpr (std::is_same_v<T, std::chrono::system_clock::time_point>) {
+            std::time_t t = std::chrono::system_clock::to_time_t(v);
+            os << std::put_time(std::localtime(&t), "%Y-%m-%d %H:%M:%S");
+        } else if constexpr (std::is_same_v<T, std::vector<std::uint8_t>>) {
+            os << "binary[";
+            for (size_t i = 0; i < v.size(); ++i) {
+                os << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(v[i]);
+                if (i + 1 < v.size()) os << ' ';
+            }
+            os << "]";
+        } else if constexpr (std::is_same_v<T, bool>) {
+            os << (v ? "true" : "false");
+        } else {
+            os << v;
+        }
+    }, value);
+
+    return os;
+}
+
+/**
  * @brief Constraint types for column validation
  */
 enum class ConstraintType {

@@ -48,6 +48,7 @@ class baseRecipe(ConanFile):
         )  # Standalone ASIO (header-only)
         self.requires("nlohmann_json/3.11.3", transitive_headers=True)
         self.test_requires("gtest/1.16.0")
+        self.test_requires("benchmark/1.9.1")
 
     def layout(self):
         cmake_layout(self)

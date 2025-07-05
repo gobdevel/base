@@ -6,12 +6,18 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Add the correct path for Conan-generated files
+list(APPEND CMAKE_PREFIX_PATH "${CMAKE_BINARY_DIR}/build/Release/generators")
+
+# Include Conan dependencies first - but use explicit find_package as recommended
+# include(${CMAKE_BINARY_DIR}/generators/conandeps_legacy.cmake)
+
 find_package(spdlog REQUIRED)
 find_package(tomlplusplus REQUIRED)
 find_package(asio REQUIRED)
-
-# Include Conan dependencies
-include(${CMAKE_BINARY_DIR}/generators/conandeps_legacy.cmake)
+find_package(nlohmann_json REQUIRED)
+find_package(GTest REQUIRED)
+find_package(benchmark REQUIRED)
 
 add_library(base
     src/logger.cpp
@@ -42,14 +48,58 @@ endif()
 
 # Add benchmark executable only if benchmarks directory exists
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks")
-    add_executable(simple_benchmark benchmarks/simple_benchmark.cpp)
-    target_link_libraries(simple_benchmark base)
-    set_target_properties(simple_benchmark PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks")
+    # Add Google Benchmark based table benchmark
+    if(benchmark_FOUND)
+        add_executable(table_benchmark benchmarks/table_benchmark.cpp)
+        target_link_libraries(table_benchmark base benchmark::benchmark)
+        set_target_properties(table_benchmark PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks")
 
-    # Add table benchmark
-    add_executable(table_benchmark benchmarks/table_benchmark.cpp)
-    target_link_libraries(table_benchmark base)
-    set_target_properties(table_benchmark PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks")
+        # Add custom targets for running benchmarks
+        add_custom_target(run_table_benchmark
+            COMMAND table_benchmark
+            DEPENDS table_benchmark
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            COMMENT "Running table benchmarks with Google Benchmark"
+        )
+
+        add_custom_target(run_table_benchmark_json
+            COMMAND table_benchmark --benchmark_format=json --benchmark_out=table_benchmark_results.json
+            DEPENDS table_benchmark
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            COMMENT "Running table benchmarks with JSON output"
+        )
+
+        # Add benchmark adapter example
+        add_executable(benchmark_adapter_example benchmarks/benchmark_adapter_example.cpp)
+        target_link_libraries(benchmark_adapter_example base benchmark::benchmark)
+        set_target_properties(benchmark_adapter_example PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks")
+
+        # Add profile-specific targets
+        add_custom_target(run_profile_quick
+            COMMAND benchmark_adapter_example --benchmark_filter=".*_Quick"
+            DEPENDS benchmark_adapter_example
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            COMMENT "Running Quick profile benchmarks"
+        )
+
+        add_custom_target(run_profile_development
+            COMMAND benchmark_adapter_example --benchmark_filter=".*_Development"
+            DEPENDS benchmark_adapter_example
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            COMMENT "Running Development profile benchmarks"
+        )
+
+        add_custom_target(run_profile_performance
+            COMMAND benchmark_adapter_example --benchmark_filter=".*_Performance"
+            DEPENDS benchmark_adapter_example
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            COMMENT "Running Performance profile benchmarks"
+        )
+
+        message(STATUS "Google Benchmark found - building table_benchmark")
+    else()
+        message(STATUS "Google Benchmark not found - skipping table_benchmark")
+    endif()
 endif()
 
 if (NOT BUILD_TESTING STREQUAL OFF)

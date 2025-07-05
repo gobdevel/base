@@ -1,341 +1,202 @@
-# Base Framework Performance Testing & Benchmarks
+# Base Framework Benchmarks
 
-This directory contains comprehensive performance testing and benchmarking tools for the Base framework.
+This directory contains performance benchmarks for the Base framework using Google Benchmark.
+
+## Overview
+
+We use Google Benchmark as our benchmarking engine, which provides:
+
+- ✅ **Statistical Analysis**: Robust statistical measurements with automatic outlier detection
+- ✅ **CPU Time & Wall Time**: Accurate time measurements with CPU scaling awareness
+- ✅ **Memory Benchmarks**: Built-in memory allocation tracking
+- ✅ **JSON/CSV Output**: Machine-readable results for CI/CD integration
+- ✅ **Regression Detection**: Compare results across runs
+- ✅ **Industry Standard**: Used by Google, LLVM, and many C++ projects
 
 ## Quick Start
 
 ### Building and Running Benchmarks
 
 ```bash
-# Build the benchmark runner
-mkdir -p build/benchmarks
-cd build/benchmarks
-cmake ../../benchmarks
+# Build the project (includes benchmarks)
+cd build/Release
+cmake ../..
 make
 
-# Run all benchmarks
-./benchmark_runner
+# Run table benchmarks
+./benchmarks/table_benchmark
 
-# Run specific benchmark categories
-./benchmark_runner --logger      # Logger performance tests
-./benchmark_runner --messaging   # Messaging system benchmarks
-./benchmark_runner --config      # Configuration access performance
-./benchmark_runner --threads     # Thread management benchmarks
-./benchmark_runner --memory      # Memory usage analysis
+# Run with JSON output
+./benchmarks/table_benchmark --benchmark_format=json --benchmark_out=results.json
+
+# Run specific benchmarks
+./benchmarks/table_benchmark --benchmark_filter="InsertRows"
+
+# Show only summary
+./benchmarks/table_benchmark --benchmark_format=console --benchmark_counters_tabular=true
 ```
 
-### Using the Existing Test Suite for Performance
+### Using Benchmark Targets
 
 ```bash
-# Run existing performance tests
-cd /path/to/base
-cmake --build build/Release
-./build/Release/tests/test_base --gtest_filter="*Performance*"
+# From the build directory
+make run_table_benchmark               # Run with console output
+make run_table_benchmark_json          # Run with JSON output
 ```
 
-## Benchmark Categories
+## Available Benchmarks
 
-### 🚀 Logger Performance
+### Table Benchmarks
 
-Tests various logging scenarios:
+Located in `table_benchmark.cpp`, these test the performance of our table system:
 
-- **Simple String Logging**: Basic log message throughput
-- **Complex Formatting**: Performance with multiple format arguments
-- **Log Level Filtering**: Overhead of level checks
-- **Async vs Sync**: Comparison of logging modes
+#### Insert Operations
 
-**Expected Performance**:
+- **InsertRows**: Bulk row insertion performance
+- **InsertRowsWithStrings**: String-heavy insertion performance
+- **InsertRandomOrder**: Non-sequential insertion patterns
 
-- Simple logs: >500K messages/second
-- Complex formatting: >200K messages/second
+#### Query Operations
 
-### 📡 Messaging System
+- **FindByValue**: Value-based row lookup
+- **FilterRows**: Conditional row filtering
+- **SortTable**: Table sorting performance
 
-Comprehensive messaging performance tests:
+#### Table Operations
 
-- **Message Queue**: Send/receive throughput
-- **Cross-Thread**: Inter-thread communication latency
-- **Message Priorities**: Priority queue performance
-- **Memory Usage**: Message storage efficiency
+- **CreateTable**: Table creation overhead
+- **CopyTable**: Deep copy performance
+- **SerializeTable**: JSON serialization performance
 
-**Expected Performance**:
+### Performance Expectations
 
-- Local queue: >1M messages/second
-- Cross-thread: >600K messages/second
-- Latency: <10μs average
+| Operation          | Expected Throughput | Notes             |
+| ------------------ | ------------------- | ----------------- |
+| Row Insertion      | >100K rows/sec      | Bulk operations   |
+| Value Lookup       | >1M lookups/sec     | Hash-based        |
+| Table Copy         | >50K rows/sec       | Deep copy         |
+| JSON Serialization | >25K rows/sec       | String formatting |
 
-### ⚙️ Configuration System
+## Benchmark Adapter
 
-Configuration access performance:
+The `benchmark_adapter.h` provides domain-specific extensions:
 
-- **Value Access**: Speed of configuration lookups
-- **Type Conversion**: Performance of type-safe access
-- **Cache Efficiency**: Repeated access patterns
-
-**Expected Performance**:
-
-- Config access: >1M operations/second
-- First access: <50μs
-- Cached access: <1μs
-
-### 🧵 Thread Management
-
-Thread lifecycle and management overhead:
-
-- **Thread Creation**: Startup and teardown time
-- **Task Posting**: Overhead of task queuing
-- **Context Switching**: Inter-thread communication cost
-
-**Expected Performance**:
-
-- Thread creation: <1ms
-- Task posting: <5μs
-- Message passing: <20μs
-
-### 📊 Table High-Scale Performance
-
-**NEW**: Comprehensive high-scale testing of the Table data structure with extreme datasets.
-
-Tests include:
-
-- **Scalability Analysis**: Insert performance from 1K to 10M+ rows
-- **Query Performance**: Complex queries on large datasets
-- **Index Performance**: Multi-column index creation and lookup
-- **Concurrency**: Parallel read/write operations (up to 16 threads)
-- **Memory Efficiency**: Memory usage analysis at scale
-- **Serialization**: JSON export/import performance
-- **Extreme Scale**: Ultimate test with 10 million rows
-
-**Performance Targets**:
-
-- Insert rate: >100K rows/second (single thread)
-- Query performance: <100ms for complex queries on 1M+ rows
-- Index creation: <5 seconds for 500K rows
-- Concurrent operations: >50K ops/second mixed read/write
-- Memory efficiency: <200 bytes per row average
-
-**Running Table Benchmarks**:
-
-```bash
-# Quick run
-./build/Release/benchmarks/table_benchmark
-
-# With logging and system monitoring
-./benchmarks/run_table_benchmark.sh
-
-# Automatic mode (no user interaction)
-./benchmarks/run_table_benchmark.sh --auto
-```
-
-**WARNING**: The extreme scale test creates 10M rows and may take 30+ minutes with several GB of memory usage.
-
-## Advanced Performance Testing
-
-### Custom Benchmarks
-
-Create custom benchmarks by extending the `BenchmarkRunner` class:
+### Profile System
 
 ```cpp
-#include "benchmark_runner.h"
+// Use predefined performance profiles
+BENCHMARK_PROFILE(MyBenchmark, Quick);       // 10-100 operations
+BENCHMARK_PROFILE(MyBenchmark, Development); // 1K-10K operations
+BENCHMARK_PROFILE(MyBenchmark, Performance); // 100K+ operations
 
-class CustomBenchmark : public BenchmarkRunner {
-public:
-    void run_custom_test() {
-        auto result = run_benchmark("Custom Test", 10000, [](size_t i) {
-            // Your test code here
-            my_function(i);
-        });
-        add_result(result);
-    }
-};
+// Or register all profiles at once
+BENCHMARK_ALL_PROFILES(MyBenchmark);
 ```
 
-### Profiling Integration
+### Custom Metrics
 
-For detailed profiling, use external tools:
+```cpp
+// Add table-specific metrics
+base::benchmark_adapter::TableMetrics::add_table_metrics(state, rows, columns);
+base::benchmark_adapter::TableMetrics::add_throughput_metrics(state, operations);
+```
+
+## Running Performance Analysis
+
+### Comparing Runs
 
 ```bash
-# CPU profiling with perf
-perf record -g ./benchmark_runner
-perf report
+# Save baseline
+./table_benchmark --benchmark_out=baseline.json --benchmark_out_format=json
 
-# Memory profiling with valgrind
-valgrind --tool=massif ./benchmark_runner
-ms_print massif.out.* | less
-
-# Address sanitizer for memory errors
-export ASAN_OPTIONS=detect_leaks=1
-./benchmark_runner_asan
+# After changes, compare
+./table_benchmark --benchmark_out=current.json --benchmark_out_format=json
+compare.py benchmarks baseline.json current.json
 ```
-
-### Load Testing
-
-For sustained load testing:
-
-```bash
-# Run benchmarks continuously for stability testing
-while true; do
-    ./benchmark_runner --messaging
-    sleep 60
-done
-```
-
-## Performance Targets
-
-### Framework Baseline
-
-| Component | Metric               | Target | Actual   |
-| --------- | -------------------- | ------ | -------- |
-| Logger    | Simple logs/sec      | >500K  | Measured |
-| Logger    | Complex logs/sec     | >200K  | Measured |
-| Messaging | Cross-thread msg/sec | >600K  | Measured |
-| Messaging | Avg latency          | <10μs  | Measured |
-| Config    | Access/sec           | >1M    | Measured |
-| Threads   | Creation time        | <1ms   | Measured |
-
-### System Requirements
-
-**Minimum Requirements:**
-
-- CPU: 2+ cores
-- RAM: 4GB available
-- Disk: SSD recommended for logging tests
-
-**Recommended for benchmarking:**
-
-- CPU: 8+ cores
-- RAM: 16GB available
-- Disk: NVMe SSD
-- Network: Gigabit (for network tests)
-
-## Interpreting Results
-
-### Key Metrics
-
-- **Throughput**: Operations per second
-- **Latency**: Time per operation (average, P95, P99)
-- **Memory Usage**: RSS/heap growth during operations
-- **CPU Usage**: System load during tests
-
-### Performance Analysis
-
-```bash
-# Generate performance report
-./benchmark_runner > performance_report.txt
-
-# Compare with baseline (if you have previous results)
-diff performance_baseline.csv benchmark_results.csv
-```
-
-### Red Flags
-
-Watch for these performance issues:
-
-- **Declining Throughput**: May indicate memory leaks
-- **High P99 Latency**: Suggests GC pauses or lock contention
-- **Memory Growth**: Potential memory leaks
-- **CPU Spikes**: Inefficient algorithms or busy loops
-
-## Continuous Performance Testing
 
 ### CI Integration
 
-Add to your CI pipeline:
-
-```yaml
-# .github/workflows/performance.yml
-- name: Run Performance Tests
-  run: |
-    cd benchmarks
-    mkdir build && cd build
-    cmake .. && make
-    ./benchmark_runner --messaging > results.txt
-
-- name: Check Performance Regression
-  run: |
-    python scripts/check_performance_regression.py results.txt baseline.txt
+```bash
+# For CI systems - fast, reliable results
+./table_benchmark --benchmark_min_time=0.1 --benchmark_repetitions=3
 ```
 
-### Automated Monitoring
-
-Set up automated performance monitoring:
+### Deep Analysis
 
 ```bash
-# Run benchmarks daily and store results
-crontab -e
-0 2 * * * cd /path/to/base/benchmarks && ./run_daily_benchmarks.sh
+# Detailed analysis with counters
+./table_benchmark --benchmark_counters_tabular=true --benchmark_format=json
 ```
 
-## Troubleshooting Performance Issues
+## Writing New Benchmarks
 
-### Common Issues
+### Basic Benchmark
 
-1. **Low Throughput**:
+```cpp
+#include <benchmark/benchmark.h>
+#include "../include/your_component.h"
 
-   - Check CPU affinity
-   - Verify compiler optimizations (-O3)
-   - Monitor system load
+static void BM_YourOperation(benchmark::State& state) {
+    // Setup
+    YourComponent component;
 
-2. **High Latency**:
+    for (auto _ : state) {
+        // Operation to benchmark
+        benchmark::DoNotOptimize(component.your_operation());
+    }
 
-   - Check for lock contention
-   - Monitor GC if using managed languages
-   - Verify thread pool configuration
+    // Optional: Add custom metrics
+    state.counters["Operations"] = state.iterations();
+}
+BENCHMARK(BM_YourOperation);
 
-3. **Memory Issues**:
-   - Run with AddressSanitizer
-   - Check for memory leaks with Valgrind
-   - Monitor RSS growth
-
-### Debug Builds vs Release
-
-Always benchmark in release mode:
-
-```bash
-# Debug builds (slower, for development)
-cmake -DCMAKE_BUILD_TYPE=Debug
-
-# Release builds (fast, for benchmarking)
-cmake -DCMAKE_BUILD_TYPE=Release
+BENCHMARK_MAIN();
 ```
 
-## Platform-Specific Notes
+### Using the Adapter
 
-### Linux
+```cpp
+#include "benchmark_adapter.h"
 
-- Use `perf` for detailed CPU profiling
-- `htop` for real-time system monitoring
-- `/proc/meminfo` for memory analysis
+BENCHMARK_PROFILE(YourBenchmark, Development) {
+    auto scale = base::benchmark_adapter::ProfileManager::get_scale_factor(
+        base::benchmark_adapter::Profile::Development);
 
-### macOS
+    for (auto _ : state) {
+        // Your scaled benchmark
+        perform_operations(scale);
+    }
 
-- Use Instruments for profiling
-- Activity Monitor for system resources
-- `vm_stat` for memory statistics
+    base::benchmark_adapter::TableMetrics::add_throughput_metrics(state, scale);
+}
+```
 
-### Windows
+## Output Format
 
-- Use Visual Studio Diagnostic Tools
-- PerfView for ETW tracing
-- Task Manager for basic monitoring
+Google Benchmark provides rich output:
 
-## Contributing Performance Tests
+```
+---------------------------------------------------------------------
+Benchmark                           Time             CPU   Iterations
+---------------------------------------------------------------------
+InsertRows/1000                  245 μs          244 μs         2856
+InsertRows/10000                2398 μs         2394 μs          292
+InsertRowsWithStrings/1000       423 μs          422 μs         1658
+FindByValue/10000                 89 μs           89 μs         7865
+```
 
-When adding new benchmarks:
+With JSON output, you get detailed statistics, memory info, and custom counters for automated analysis.
 
-1. Follow the existing naming convention
-2. Include both throughput and latency measurements
-3. Add appropriate documentation
-4. Test on multiple platforms
-5. Include baseline performance expectations
+## Dependencies
 
-## Resources
+- **Google Benchmark**: Core benchmarking engine
+- **Conan**: Package management (Google Benchmark provided as test dependency)
+- **CMake**: Build system integration
 
-- [spdlog performance](https://github.com/gabime/spdlog#benchmarks)
-- [ASIO performance](https://think-async.com/Asio/asio-1.18.1/doc/asio/overview/core/basics.html)
-- [C++ benchmarking best practices](https://github.com/google/benchmark)
-- [Linux perf tutorial](https://perf.wiki.kernel.org/index.php/Tutorial)
+## Best Practices
 
----
-
-_Last updated: Performance testing guide reflects current framework capabilities and benchmarking best practices._
+1. **Warm-up**: Google Benchmark handles warm-up automatically
+2. **CPU Scaling**: Results are CPU scaling-aware
+3. **Memory**: Use `DoNotOptimize()` to prevent unwanted optimizations
+4. **Reproducibility**: Use `--benchmark_repetitions` for stable results
+5. **Filtering**: Use `--benchmark_filter` to run specific tests during development
