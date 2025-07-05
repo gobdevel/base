@@ -842,6 +842,7 @@ std::string Table::to_json() const {
 bool Table::from_json(const std::string& json) {
     try {
         auto j = nlohmann::json::parse(json);
+        Logger::info(__PRETTY_FUNCTION__);
 
         // Load schema
         auto schema_json = j["schema"].dump();
@@ -850,10 +851,12 @@ bool Table::from_json(const std::string& json) {
             return false;
         }
         schema_ = std::move(new_schema);
+        Logger::info("Loaded schema: {}", schema_->get_name());
 
         // Load rows
         std::unique_lock lock(table_mutex_);
         rows_.clear();
+        Logger::info("Loading rows...");
 
         for (const auto& row_json : j["rows"]) {
             auto row_str = row_json.dump();
@@ -865,8 +868,14 @@ bool Table::from_json(const std::string& json) {
             }
         }
 
-        // Rebuild indexes
+        // Clear indexes while holding the lock
         indexes_.clear();
+
+        // Release lock before calling create_index to avoid deadlock
+        lock.unlock();
+
+        // Rebuild indexes
+        Logger::info("Rebuilding indexes...");
         if (j.contains("indexes")) {
             for (const auto& index_json : j["indexes"]) {
                 create_index(
@@ -878,6 +887,7 @@ bool Table::from_json(const std::string& json) {
         }
 
         // Load statistics
+        Logger::info("Loading statistics...");
         if (j.contains("statistics")) {
             const auto& stats = j["statistics"];
             total_inserts_ = stats.value("total_inserts", 0);

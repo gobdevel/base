@@ -82,5 +82,13 @@ add_custom_target(bench_memory
     COMMENT "Running memory usage benchmarks"
 )
 
+# Add table benchmark target
+add_custom_target(bench_tables
+    COMMAND ${CMAKE_BINARY_DIR}/table_benchmark
+    DEPENDS table_benchmark
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/results
+    COMMENT "Running high-scale table benchmarks"
+)
+
 # Documentation
 install(FILES README.md DESTINATION share/doc/base-benchmarks)

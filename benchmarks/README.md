@@ -92,6 +92,43 @@ Thread lifecycle and management overhead:
 - Task posting: <5μs
 - Message passing: <20μs
 
+### 📊 Table High-Scale Performance
+
+**NEW**: Comprehensive high-scale testing of the Table data structure with extreme datasets.
+
+Tests include:
+
+- **Scalability Analysis**: Insert performance from 1K to 10M+ rows
+- **Query Performance**: Complex queries on large datasets
+- **Index Performance**: Multi-column index creation and lookup
+- **Concurrency**: Parallel read/write operations (up to 16 threads)
+- **Memory Efficiency**: Memory usage analysis at scale
+- **Serialization**: JSON export/import performance
+- **Extreme Scale**: Ultimate test with 10 million rows
+
+**Performance Targets**:
+
+- Insert rate: >100K rows/second (single thread)
+- Query performance: <100ms for complex queries on 1M+ rows
+- Index creation: <5 seconds for 500K rows
+- Concurrent operations: >50K ops/second mixed read/write
+- Memory efficiency: <200 bytes per row average
+
+**Running Table Benchmarks**:
+
+```bash
+# Quick run
+./build/Release/benchmarks/table_benchmark
+
+# With logging and system monitoring
+./benchmarks/run_table_benchmark.sh
+
+# Automatic mode (no user interaction)
+./benchmarks/run_table_benchmark.sh --auto
+```
+
+**WARNING**: The extreme scale test creates 10M rows and may take 30+ minutes with several GB of memory usage.
+
 ## Advanced Performance Testing
 
 ### Custom Benchmarks

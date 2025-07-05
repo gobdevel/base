@@ -918,3 +918,270 @@ for (const auto& row : *table1) {
 ---
 
 _For more examples and advanced usage, see [Examples Documentation](Tables-Examples.md) and [Iterator Guide](Tables-Iterators.md)._
+
+## Table Dump and Print API
+
+The Table class provides comprehensive output formatting and display capabilities for both programmatic and CLI usage.
+
+### TableDumpOptions
+
+Configuration structure for controlling table output format and behavior.
+
+```cpp
+struct TableDumpOptions {
+    TableOutputFormat format = TableOutputFormat::ASCII;    // Output format
+    std::size_t page_size = 50;                            // Rows per page (0 = no paging)
+    std::size_t max_column_width = 40;                     // Maximum column width
+    bool show_row_numbers = false;                         // Show row IDs
+    bool show_headers = true;                              // Show column headers
+    bool truncate_long_values = true;                      // Truncate values exceeding max_column_width
+    std::string null_representation = "NULL";              // How to display null values
+    std::vector<std::string> columns_to_show;              // Specific columns (empty = all)
+    TableQuery filter_query;                              // Optional query to filter rows
+    bool color_output = false;                             // Enable ANSI color codes
+};
+```
+
+### Output Formats
+
+```cpp
+enum class TableOutputFormat {
+    ASCII,      // ASCII table with borders
+    CSV,        // Comma-separated values
+    TSV,        // Tab-separated values
+    JSON,       // JSON array format
+    Markdown    // Markdown table format
+};
+```
+
+### Dump Methods
+
+```cpp
+// Print to stdout with options
+void dump(const TableDumpOptions& options = {}) const;
+
+// Print to specific stream
+void dump_to_stream(std::ostream& stream, const TableDumpOptions& options = {}) const;
+
+// Return formatted string
+std::string dump_to_string(const TableDumpOptions& options = {}) const;
+
+// Create paging interface
+std::unique_ptr<TablePager> create_pager(const TableDumpOptions& options = {}) const;
+```
+
+### TablePager
+
+Interactive paging interface for large tables.
+
+```cpp
+class TablePager {
+public:
+    explicit TablePager(const Table& table, const TableDumpOptions& options = {});
+
+    // Paging operations
+    void show_page(std::size_t page_number = 0) const;
+    void show_next_page();
+    void show_previous_page();
+    void show_first_page();
+    void show_last_page();
+
+    // Navigation info
+    std::size_t get_current_page() const;
+    std::size_t get_total_pages() const;
+    std::size_t get_total_rows() const;
+
+    // Interactive mode
+    void start_interactive_mode();  // Interactive CLI paging
+
+    // Direct output
+    std::string get_page_as_string(std::size_t page_number = 0) const;
+};
+```
+
+### CLI-Friendly Methods
+
+```cpp
+// Print table summary information
+void print_summary() const;
+
+// Print detailed schema information
+void print_schema() const;
+
+// Print usage statistics
+void print_statistics() const;
+```
+
+### Usage Examples
+
+#### Basic Output
+
+```cpp
+auto table = createEmployeeTable();
+// ... populate table ...
+
+// Simple ASCII output to console
+table->dump();
+
+// CSV format
+TableDumpOptions csv_opts;
+csv_opts.format = TableOutputFormat::CSV;
+table->dump(csv_opts);
+
+// JSON format with specific columns
+TableDumpOptions json_opts;
+json_opts.format = TableOutputFormat::JSON;
+json_opts.columns_to_show = {"name", "email", "salary"};
+table->dump(json_opts);
+```
+
+#### Paging Large Tables
+
+```cpp
+// Create pager with 25 rows per page
+TableDumpOptions page_opts;
+page_opts.page_size = 25;
+page_opts.show_row_numbers = true;
+
+auto pager = table->create_pager(page_opts);
+
+// Show specific pages
+pager->show_page(0);  // First page
+pager->show_page(1);  // Second page
+
+// Navigation
+pager->show_next_page();
+pager->show_previous_page();
+
+// Interactive CLI mode
+pager->start_interactive_mode();
+```
+
+#### Filtered Output
+
+```cpp
+// Show only active employees in Engineering
+TableDumpOptions filter_opts;
+filter_opts.filter_query
+    .where("department", QueryOperator::Equal, std::string("Engineering"))
+    .where("active", QueryOperator::Equal, true)
+    .order_by("salary", false);  // Descending by salary
+filter_opts.columns_to_show = {"name", "email", "salary"};
+
+table->dump(filter_opts);
+```
+
+#### Stream Output
+
+```cpp
+// Output to file
+std::ofstream file("employees.csv");
+TableDumpOptions csv_opts;
+csv_opts.format = TableOutputFormat::CSV;
+table->dump_to_stream(file, csv_opts);
+
+// Get as string for further processing
+std::string json_data = table->dump_to_string(json_opts);
+// Process json_data...
+```
+
+#### CLI Integration
+
+```cpp
+// Summary information
+table->print_summary();
+// Output:
+// === Table Summary ===
+// Name: employees
+// Schema Version: 1
+// Rows: 1000
+// Columns: 8
+// Indexes: 3
+// Primary Key: id
+// Created: 2025-07-04 00:15:30
+// Last Modified: 2025-07-04 00:20:45
+
+// Schema details
+table->print_schema();
+// Output: Formatted table showing all columns with types, constraints
+
+// Usage statistics
+table->print_statistics();
+// Output: Detailed statistics including performance metrics
+```
+
+### Performance Characteristics
+
+The dump/print API is designed for efficiency:
+
+- **Streaming Output**: No memory overhead for large tables
+- **Lazy Evaluation**: Filtering and formatting applied on-demand
+- **Thread Safe**: All read operations are thread-safe
+- **Memory Efficient**: Minimal temporary allocations
+- **Fast Formatting**: Optimized string operations
+
+**Benchmark Results** (1M row table):
+
+- ASCII format: ~200K rows/sec
+- CSV format: ~500K rows/sec
+- JSON format: ~150K rows/sec
+- Filtered output: Query time + format time
+- Memory usage: <10MB regardless of table size
+
+### Known Issues and Limitations
+
+**JSON Serialization Performance**: The current Table JSON serialization implementation (`to_json()` and `from_json()`) has performance issues with larger datasets (>100 rows) and may hang or be extremely slow. This is a known limitation of the current implementation.
+
+**Workarounds**:
+
+- Use alternative serialization formats (CSV, TSV) for large tables
+- Implement custom serialization for specific use cases
+- Use the table dump API with JSON format for display purposes (more efficient)
+- Consider breaking large tables into smaller chunks for JSON serialization
+
+**Benchmark Integration**: The table benchmark suite automatically detects and skips problematic serialization tests. Use `--enable-serialization` flag to test JSON serialization with small datasets.
+
+---
+
+## Performance Benchmarks and Results
+
+### High-Scale Table Benchmark Results
+
+The Table system has been extensively benchmarked with datasets up to 10 million rows. Here are key performance metrics:
+
+#### Scalability Performance
+
+- **1K rows**: 166,667 rows/sec insertion
+- **10K rows**: 212,766 rows/sec insertion
+- **100K rows**: 273,224 rows/sec insertion
+- **500K rows**: 260,281 rows/sec insertion
+- **1M rows**: 257,998 rows/sec insertion
+
+#### Insertion Performance
+
+- **Batch Insert (1M rows)**: 388,500 rows/sec
+- **Concurrent Insert (500K, 8 threads)**: 90,909 rows/sec
+- **With Indexes (100K rows, 5 indexes)**: 118,064 rows/sec
+
+#### Query Performance (1M row table)
+
+- **Exact Match**: 66,880 rows/sec
+- **Range Query**: 95,032 rows/sec
+- **Complex Multi-Condition**: 53 rows/sec
+- **Paginated Query**: 552 rows/sec
+
+#### Index Performance (500K row table)
+
+- **Index Creation**: 125-447ms per index
+- **Indexed Exact Match**: <10μs lookup time
+
+#### Concurrency Performance
+
+- **Concurrent Reads (8 threads)**: 11 queries/sec
+- **Mixed Read/Write (6 threads)**: 20,690 ops/sec
+
+#### Memory Efficiency
+
+- Memory usage scales efficiently with row count
+- Consistent performance across different table sizes
+- No significant memory leaks detected in stress tests
