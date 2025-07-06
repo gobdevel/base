@@ -26,8 +26,20 @@ class baseRecipe(ConanFile):
 
     # Binary configuration
     settings = "os", "compiler", "build_type", "arch"
-    options = {"shared": [True, False], "fPIC": [True, False]}
-    default_options = {"shared": False, "fPIC": True}
+    options = {
+        "shared": [True, False],
+        "fPIC": [True, False],
+        "enable_tests": [True, False],
+        "enable_benchmarks": [True, False],
+        "enable_examples": [True, False],
+    }
+    default_options = {
+        "shared": False,
+        "fPIC": True,
+        "enable_tests": True,
+        "enable_benchmarks": True,
+        "enable_examples": True,
+    }
 
     # Sources are located in the same place as this recipe, copy them to the recipe
     exports_sources = "CMakeLists.txt", "src/*", "include/*", "tests/*"
@@ -58,6 +70,9 @@ class baseRecipe(ConanFile):
         deps.generate()
         tc = CMakeToolchain(self)
         tc.variables["CMAKE_EXPORT_COMPILE_COMMANDS"] = True
+        tc.variables["BUILD_TESTING"] = self.options.enable_tests
+        tc.variables["BUILD_BENCHMARK"] = self.options.enable_benchmarks
+        tc.variables["BUILD_EXAMPLE"] = self.options.enable_examples
         tc.generate()
 
     def build(self):
