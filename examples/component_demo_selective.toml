@@ -1,0 +1,25 @@
+# Component Logging Demo Configuration - Only Auth and Cache Enabled
+# This configuration demonstrates enabling only specific components
+
+[ComponentLoggingDemo]
+
+[ComponentLoggingDemo.logging]
+level = "debug"
+enable_console = true
+enable_file = false
+enable_colors = true
+pattern = "[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] %v"
+
+# Component filtering settings
+enable_component_logging = true
+component_pattern = "[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%n] %v"
+
+# Enable only auth and cache components
+enabled_components = ["auth", "cache"]
+disabled_components = []
+
+[ComponentLoggingDemo.app]
+name = "ComponentLoggingDemo"
+version = "1.0.0"
+description = "Demonstrates runtime component-level logging and filtering"
+debug_mode = true

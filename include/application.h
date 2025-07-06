@@ -67,7 +67,7 @@ struct ApplicationConfig {
     bool use_dedicated_io_thread = true;
 
     // Signal handling
-    std::vector<int> handled_signals = {SIGINT, SIGTERM, SIGUSR1, SIGUSR2};
+    std::vector<int> handled_signals = {SIGINT, SIGTERM, SIGHUP, SIGUSR1, SIGUSR2};
 
     // Lifecycle timeouts
     std::chrono::milliseconds startup_timeout = std::chrono::milliseconds(30000);
@@ -385,6 +385,12 @@ public:
      * @return true if stopped within timeout
      */
     bool wait_for_stop(std::chrono::milliseconds timeout = std::chrono::milliseconds::max());
+
+    /**
+     * @brief Reload application configuration
+     * @return true if configuration was reloaded successfully
+     */
+    bool reload_config();
 
     // Thread Management API
 
@@ -737,6 +743,13 @@ protected:
      * @param signal Signal number received
      */
     virtual void on_signal(int signal);
+
+    /**
+     * @brief Override this method for custom config reload handling
+     * Called when SIGHUP is received or reload_config() is called
+     * @return true if config was reloaded successfully
+     */
+    virtual bool on_config_reload();
 
     /**
      * @brief Override this method for custom error handling

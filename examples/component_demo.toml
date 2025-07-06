@@ -1,0 +1,30 @@
+# Component Logging Demo Configuration
+# This configuration demonstrates runtime component filtering
+
+[ComponentLoggingDemo]
+
+[ComponentLoggingDemo.logging]
+level = "debug"
+enable_console = true
+enable_file = false
+enable_colors = true
+pattern = "[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] %v"
+
+# Component filtering settings
+enable_component_logging = true
+component_pattern = "[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%n] %v"
+
+# Initially enable all components
+enabled_components = []
+
+# To disable specific components, uncomment and modify:
+disabled_components = ["database", "network"]
+
+# To enable only specific components, uncomment and modify:
+# enabled_components = ["auth", "cache"]
+
+[ComponentLoggingDemo.app]
+name = "ComponentLoggingDemo"
+version = "1.0.0"
+description = "Demonstrates runtime component-level logging and filtering"
+debug_mode = true

@@ -302,6 +302,41 @@ LoggingConfig ConfigManager::parse_logging_config(const toml::table& app_table) 
                     config.flush_immediately = *flush_val;
                 }
             }
+
+            // Component filtering settings
+            if (auto enable_component = logging.get("enable_component_logging")) {
+                if (auto enable = enable_component->value<bool>()) {
+                    config.enable_component_logging = *enable;
+                }
+            }
+
+            if (auto enabled_components = logging.get("enabled_components")) {
+                if (enabled_components->is_array()) {
+                    const auto& arr = *enabled_components->as_array();
+                    for (const auto& elem : arr) {
+                        if (auto comp_str = elem.value<std::string>()) {
+                            config.enabled_components.push_back(*comp_str);
+                        }
+                    }
+                }
+            }
+
+            if (auto disabled_components = logging.get("disabled_components")) {
+                if (disabled_components->is_array()) {
+                    const auto& arr = *disabled_components->as_array();
+                    for (const auto& elem : arr) {
+                        if (auto comp_str = elem.value<std::string>()) {
+                            config.disabled_components.push_back(*comp_str);
+                        }
+                    }
+                }
+            }
+
+            if (auto component_pattern = logging.get("component_pattern")) {
+                if (auto pattern_str = component_pattern->value<std::string>()) {
+                    config.component_pattern = *pattern_str;
+                }
+            }
         }
     }
 

@@ -878,6 +878,38 @@ void Application::handle_exception(const std::exception& e) {
 void Application::on_signal(int signal) {
     // Default implementation - can be overridden by derived classes
     Logger::debug("Default signal handler for signal {}", signal);
+
+    // Handle SIGHUP for config reload
+    if (signal == SIGHUP) {
+        Logger::info("Received SIGHUP signal - reloading configuration");
+        if (!reload_config()) {
+            Logger::warn("Failed to reload configuration");
+        }
+    }
+}
+
+bool Application::reload_config() {
+    Logger::info("Reloading application configuration...");
+
+    // Default implementation: reload logger configuration
+    bool success = Logger::reload_config(config_.name);
+
+    if (success) {
+        Logger::info("Configuration reloaded successfully");
+    } else {
+        Logger::warn("Failed to reload configuration");
+    }
+
+    // Allow derived classes to handle additional config reload logic
+    bool custom_success = on_config_reload();
+
+    return success && custom_success;
+}
+
+bool Application::on_config_reload() {
+    // Default implementation - can be overridden by derived classes
+    Logger::debug("Default config reload handler");
+    return true;
 }
 
 void Application::on_error(const std::exception& error) {

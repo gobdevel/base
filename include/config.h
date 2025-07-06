@@ -35,6 +35,12 @@ struct LoggingConfig {
     size_t max_file_size = 10 * 1024 * 1024; ///< Max file size in bytes (10MB)
     size_t max_files = 5;                    ///< Max number of rotating files
     bool flush_immediately = false;          ///< Flush after each log message
+
+    // Component filtering settings
+    bool enable_component_logging = true;    ///< Enable component-based logging and filtering
+    std::vector<std::string> enabled_components; ///< Only log these components (empty = all enabled)
+    std::vector<std::string> disabled_components; ///< Exclude these components from logging
+    std::string component_pattern = "[%Y-%m-%d %H:%M:%S.%e] [%n] [%^%l%$] %v"; ///< Pattern for component logging
 };
 
 /**
