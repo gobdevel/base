@@ -17,7 +17,6 @@ if(benchmark_FOUND)
         benchmark::benchmark
         Threads::Threads
     )
-    target_include_directories(table_benchmark PRIVATE ../include)
 
     # Add custom targets for running benchmarks
     add_custom_target(run_table_benchmark
@@ -46,7 +45,6 @@ target_link_libraries(benchmark_adapter_example
     benchmark::benchmark
     Threads::Threads
 )
-target_include_directories(benchmark_adapter_example PRIVATE ../include)
 
 # Create output directory for results
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/benchmark_results)
