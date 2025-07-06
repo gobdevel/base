@@ -7,6 +7,15 @@
 add_executable(app_example app_example.cpp)
 target_link_libraries(app_example base)
 
+# Daemon application example (UNIX only)
+if(UNIX)
+    add_executable(daemon_example daemon_example.cpp)
+    target_link_libraries(daemon_example base)
+
+    add_executable(simple_daemon_test simple_daemon_test.cpp)
+    target_link_libraries(simple_daemon_test base)
+endif()
+
 # Configuration system demonstration
 add_executable(config_example config_example.cpp)
 target_link_libraries(config_example base)
@@ -27,6 +36,10 @@ target_link_libraries(messaging_example base)
 add_executable(cli_example cli_example.cpp)
 target_link_libraries(cli_example base)
 
+# Command-line arguments demonstration
+add_executable(cli_args_example cli_args_example.cpp)
+target_link_libraries(cli_args_example base)
+
 # Table system demonstration
 add_executable(table_example table_example.cpp)
 target_link_libraries(table_example base)
@@ -34,6 +47,10 @@ target_link_libraries(table_example base)
 # Table dump/print API demonstration
 add_executable(table_dump_example table_dump_example.cpp)
 target_link_libraries(table_dump_example base)
+
+# App example 2
+add_executable(app_example_2 app_example_2.cpp)
+target_link_libraries(app_example_2 base)
 
 # Set output directory for all examples
 set_target_properties(
@@ -44,6 +61,7 @@ set_target_properties(
     cli_example
     table_example
     table_dump_example
+    app_example_2
     PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
 )
@@ -57,6 +75,7 @@ set_target_properties(
     cli_example
     table_example
     table_dump_example
+    app_example_2
     PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON

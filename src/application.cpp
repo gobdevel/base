@@ -15,12 +15,28 @@
 #include <iomanip>
 #include <iostream>
 
+#if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <sys/resource.h>
+#include <cerrno>
+#include <cstring>
+#include <fstream>
+#include <sstream>
+#endif
+
 namespace base {
 
 Application::Application(ApplicationConfig config)
     : config_(std::move(config))
     , signals_(io_context_)
 {
+#if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
+    // Initialize static instance for signal handling
+    if (!signal_instance_) {
+        signal_instance_ = this;
+    }
+#endif
     Logger::info("Application '{}' created (version: {})", config_.name, config_.version);
     Logger::debug("Worker threads: {}, IO thread: {}",
                   config_.worker_threads,
@@ -33,6 +49,13 @@ Application::~Application() {
         Logger::warn("Application destroyed without proper shutdown");
         force_shutdown();
     }
+#if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
+    remove_pid_file();
+    // Clear static instance
+    if (signal_instance_ == this) {
+        signal_instance_ = nullptr;
+    }
+#endif
     Logger::info("Application '{}' destroyed", config_.name);
 }
 
@@ -41,6 +64,13 @@ int Application::run() {
     Logger::info("Description: {}", config_.description);
 
     try {
+        // Daemonize if requested (must be done before any other initialization)
+        if (!daemonize()) {
+            Logger::critical("Daemonization failed");
+            change_state(ApplicationState::Failed);
+            return EXIT_FAILURE;
+        }
+
         // Initialize the application
         if (!initialize_internal()) {
             Logger::critical("Application initialization failed");
@@ -90,6 +120,166 @@ int Application::run() {
     }
 }
 
+int Application::run(int argc, char* argv[]) {
+    // Parse command line arguments first
+    if (config_.parse_command_line) {
+        if (!parse_command_line_args(argc, argv)) {
+            return EXIT_SUCCESS; // Help or version was shown, exit cleanly
+        }
+    }
+
+    // Apply command line overrides to configuration
+    apply_command_line_overrides();
+
+    // Continue with normal startup
+    return run();
+}
+
+bool Application::parse_command_line_args(int argc, char* argv[]) {
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+
+        if (arg == "--help" || arg == "-h") {
+            show_help(argv[0]);
+            config_.show_help_and_exit = true;
+            return false;
+        }
+        else if (arg == "--version" || arg == "-v") {
+            show_version();
+            config_.show_version_and_exit = true;
+            return false;
+        }
+        else if (arg == "--daemon" || arg == "-d") {
+            config_.daemonize = true;
+        }
+        else if (arg == "--no-daemon" || arg == "-f") {
+            config_.force_foreground = true;
+            config_.daemonize = false;
+        }
+        else if (arg == "--config" || arg == "-c") {
+            if (i + 1 < argc) {
+                config_.custom_config_file = argv[++i];
+            } else {
+                std::cerr << "Error: " << arg << " requires a filename argument" << std::endl;
+                return false;
+            }
+        }
+        else if (arg == "--log-level" || arg == "-l") {
+            if (i + 1 < argc) {
+                config_.custom_log_level = argv[++i];
+            } else {
+                std::cerr << "Error: " << arg << " requires a level argument (debug|info|warn|error|critical)" << std::endl;
+                return false;
+            }
+        }
+        else if (arg == "--log-file") {
+            if (i + 1 < argc) {
+                config_.custom_log_file = argv[++i];
+            } else {
+                std::cerr << "Error: " << arg << " requires a filename argument" << std::endl;
+                return false;
+            }
+        }
+        else if (arg == "--pid-file") {
+            if (i + 1 < argc) {
+                config_.daemon_pid_file = argv[++i];
+            } else {
+                std::cerr << "Error: " << arg << " requires a filename argument" << std::endl;
+                return false;
+            }
+        }
+        else if (arg == "--work-dir") {
+            if (i + 1 < argc) {
+                config_.daemon_work_dir = argv[++i];
+            } else {
+                std::cerr << "Error: " << arg << " requires a directory argument" << std::endl;
+                return false;
+            }
+        }
+        else if (arg == "--user") {
+            if (i + 1 < argc) {
+                config_.daemon_user = argv[++i];
+            } else {
+                std::cerr << "Error: " << arg << " requires a username argument" << std::endl;
+                return false;
+            }
+        }
+        else if (arg == "--group") {
+            if (i + 1 < argc) {
+                config_.daemon_group = argv[++i];
+            } else {
+                std::cerr << "Error: " << arg << " requires a group name argument" << std::endl;
+                return false;
+            }
+        }
+        else if (arg.starts_with("--")) {
+            std::cerr << "Error: Unknown option: " << arg << std::endl;
+            std::cerr << "Use --help for usage information" << std::endl;
+            return false;
+        }
+        else {
+            std::cerr << "Error: Unexpected argument: " << arg << std::endl;
+            std::cerr << "Use --help for usage information" << std::endl;
+            return false;
+        }
+    }
+
+    return true; // Continue with application startup
+}
+
+void Application::show_help(const char* program_name) const {
+    std::cout << config_.name << " v" << config_.version << "\n";
+    std::cout << config_.description << "\n\n";
+    std::cout << "Usage: " << program_name << " [options]\n\n";
+    std::cout << "Options:\n";
+    std::cout << "  -h, --help              Show this help message and exit\n";
+    std::cout << "  -v, --version           Show version information and exit\n";
+    std::cout << "  -d, --daemon            Run as daemon process\n";
+    std::cout << "  -f, --no-daemon         Force foreground mode (override config)\n";
+    std::cout << "  -c, --config FILE       Use specified configuration file\n";
+    std::cout << "  -l, --log-level LEVEL   Set log level (debug|info|warn|error|critical)\n";
+    std::cout << "      --log-file FILE     Write logs to specified file\n";
+    std::cout << "      --pid-file FILE     Write process ID to specified file (daemon mode)\n";
+    std::cout << "      --work-dir DIR      Set working directory (daemon mode)\n";
+    std::cout << "      --user USER         Run as specified user (daemon mode)\n";
+    std::cout << "      --group GROUP       Run as specified group (daemon mode)\n";
+    std::cout << "\n";
+    std::cout << "Examples:\n";
+    std::cout << "  " << program_name << " --daemon --pid-file /var/run/app.pid\n";
+    std::cout << "  " << program_name << " --config /etc/app.conf --log-level debug\n";
+    std::cout << "  " << program_name << " --no-daemon --log-file app.log\n";
+}
+
+void Application::show_version() const {
+    std::cout << config_.name << " version " << config_.version << "\n";
+    std::cout << config_.description << "\n";
+}
+
+void Application::apply_command_line_overrides() {
+    // Apply custom config file if specified
+    if (!config_.custom_config_file.empty()) {
+        config_.config_file = config_.custom_config_file;
+    }
+
+    // Apply custom log file if specified
+    if (!config_.custom_log_file.empty()) {
+        config_.daemon_log_file = config_.custom_log_file;
+    }
+
+    // Apply log level if specified
+    if (!config_.custom_log_level.empty()) {
+        // Note: This would need to be integrated with the logger initialization
+        // For now, we just store it and it can be used when initializing the logger
+        Logger::debug("Custom log level specified: {}", config_.custom_log_level);
+    }
+
+    // Ensure foreground mode overrides daemon mode
+    if (config_.force_foreground) {
+        config_.daemonize = false;
+        Logger::debug("Forcing foreground mode (daemon mode disabled)");
+    }
+}
+
 void Application::shutdown() {
     Logger::info("Graceful shutdown requested");
     change_state(ApplicationState::Stopping);
@@ -129,7 +319,20 @@ bool Application::initialize_internal() {
         }
 
         // Setup signal handling
-        setup_signal_handling();
+        if (config_.daemonize) {
+            // For daemon mode, use UNIX signal handlers since ASIO signal handling
+            // doesn't work reliably after fork
+            Logger::debug("Using UNIX signal handlers for daemon mode");
+            setup_unix_signal_handlers();
+        } else {
+            // For normal mode, use ASIO signal handling
+            setup_signal_handling();
+        }
+
+        // If we're daemonized, ensure signal handling works correctly after fork
+        if (config_.daemonize) {
+            Logger::debug("Signal handling configured for daemon process");
+        }
 
         // Create work guard to keep IO context alive
         work_guard_ = std::make_unique<asio::executor_work_guard<asio::io_context::executor_type>>(
@@ -267,6 +470,13 @@ void Application::stop_internal() {
         // Call user cleanup
         on_cleanup();
 
+#if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
+        // Remove PID file if we're daemonized
+        if (config_.daemonize) {
+            remove_pid_file();
+        }
+#endif
+
         change_state(ApplicationState::Stopped);
         Logger::info("Application shutdown completed");
 
@@ -280,6 +490,9 @@ void Application::stop_internal() {
 void Application::setup_signal_handling() {
     Logger::debug("Setting up signal handling");
 
+    // Clear any existing signal handlers
+    signals_.clear();
+
     for (int signal : config_.handled_signals) {
         signals_.add(signal);
         Logger::trace("Added signal handler for signal {}", signal);
@@ -288,8 +501,26 @@ void Application::setup_signal_handling() {
     signals_.async_wait([this](const asio::error_code& ec, int signal) {
         if (!ec) {
             handle_signal(signal);
+            // Re-register for the next signal (only if not shutting down)
+            if (state_.load() != ApplicationState::Stopping &&
+                state_.load() != ApplicationState::Stopped) {
+                setup_signal_handling();
+            }
+        } else if (ec != asio::error::operation_aborted) {
+            Logger::debug("Signal wait error: {}", ec.message());
         }
     });
+}
+
+void Application::reset_signal_handling_after_fork() {
+    Logger::debug("Resetting signal handling after fork");
+
+    // Cancel existing signal handling
+    signals_.cancel();
+
+    // Re-initialize signal handling with the IO context
+    // This is needed because fork() invalidates the signal handling setup
+    setup_signal_handling();
 }
 
 void Application::handle_signal(int signal) {
@@ -313,6 +544,13 @@ void Application::handle_signal(int signal) {
         case SIGINT:
         case SIGTERM:
             Logger::info("Shutdown signal received, initiating graceful shutdown");
+#if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
+            // If we're a daemon, clean up PID file immediately upon shutdown signal
+            if (config_.daemonize && !config_.daemon_pid_file.empty()) {
+                Logger::debug("Cleaning up PID file due to shutdown signal");
+                remove_pid_file();
+            }
+#endif
             shutdown();
             break;
 
@@ -981,5 +1219,282 @@ void Application::disable_cli() {
 bool Application::is_cli_enabled() const {
     return cli_enabled_ && CLI::instance().is_running();
 }
+
+// ============================================================================
+// Daemonization Implementation
+// ============================================================================
+
+bool Application::daemonize() {
+#if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
+    if (!config_.daemonize) {
+        Logger::debug("Daemonization not requested");
+        return true;
+    }
+
+    Logger::info("Starting daemonization process");
+    return daemonize_unix();
+#else
+    if (config_.daemonize) {
+        Logger::error("Daemonization not supported on this platform");
+        return false;
+    }
+    return true;
+#endif
+}
+
+#if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
+bool Application::daemonize_unix() {
+    // Step 1: Fork first child and exit parent
+    pid_t pid = fork();
+    if (pid < 0) {
+        Logger::error("First fork failed: {}", std::strerror(errno));
+        return false;
+    }
+
+    if (pid > 0) {
+        // Parent process - exit
+        Logger::info("Parent process exiting (child PID: {})", pid);
+        std::exit(EXIT_SUCCESS);
+    }
+
+    // Step 2: Become session leader
+    if (setsid() < 0) {
+        Logger::error("setsid failed: {}", std::strerror(errno));
+        return false;
+    }
+
+    // Step 3: Fork second child and exit first child
+    // This ensures the daemon cannot acquire a controlling terminal
+    pid = fork();
+    if (pid < 0) {
+        Logger::error("Second fork failed: {}", std::strerror(errno));
+        return false;
+    }
+
+    if (pid > 0) {
+        // First child - exit
+        std::exit(EXIT_SUCCESS);
+    }
+
+    // Step 3.5: Configure logger for daemon mode before redirecting FDs
+    if (!config_.daemon_log_file.empty()) {
+        LoggerConfig daemon_logger_config{
+            .app_name = config_.name,
+            .log_file = std::filesystem::path{config_.daemon_log_file},
+            .level = LogLevel::Debug,
+            .enable_console = false,  // Disable console output in daemon mode
+            .enable_file = true
+        };
+        Logger::init(daemon_logger_config);
+        Logger::info("Logger reconfigured for daemon mode to: {}", config_.daemon_log_file);
+        Logger::flush();  // Ensure the configuration message is written
+    }
+
+    // Step 4: Change working directory
+    if (!config_.daemon_work_dir.empty()) {
+        if (chdir(config_.daemon_work_dir.c_str()) < 0) {
+            Logger::error("Failed to change working directory to '{}': {}",
+                         config_.daemon_work_dir, std::strerror(errno));
+            return false;
+        }
+        Logger::debug("Changed working directory to '{}'", config_.daemon_work_dir);
+    }
+
+    // Step 5: Set file creation mask
+    umask(config_.daemon_umask);
+    Logger::debug("Set umask to {:o}", config_.daemon_umask);
+
+    // Step 6: Close all file descriptors
+    if (config_.daemon_close_fds) {
+        close_all_fds();
+    }
+
+    // Step 7: Redirect standard file descriptors
+    if (!redirect_standard_fds()) {
+        Logger::error("Failed to redirect standard file descriptors");
+        return false;
+    }
+
+    // Step 8: Drop privileges if requested
+    if (!drop_privileges()) {
+        Logger::error("Failed to drop privileges");
+        return false;
+    }
+
+    // Step 9: Create PID file
+    if (!create_pid_file()) {
+        Logger::error("Failed to create PID file");
+        return false;
+    }
+
+    // Step 10: Set up UNIX signal handlers for daemon mode
+    // ASIO signal handling doesn't work reliably after fork, so use traditional UNIX signals
+    Logger::debug("Setting up UNIX signal handlers for daemon process");
+    setup_unix_signal_handlers();
+
+    Logger::info("Daemonization completed successfully (PID: {})", getpid());
+    return true;
+}
+
+bool Application::drop_privileges() {
+    // Drop group privileges first
+    if (!config_.daemon_group.empty()) {
+        struct group* grp = getgrnam(config_.daemon_group.c_str());
+        if (!grp) {
+            Logger::error("Group '{}' not found", config_.daemon_group);
+            return false;
+        }
+
+        if (setgid(grp->gr_gid) < 0) {
+            Logger::error("Failed to set group ID to {}: {}",
+                         grp->gr_gid, std::strerror(errno));
+            return false;
+        }
+        Logger::debug("Set group to '{}' (GID: {})", config_.daemon_group, grp->gr_gid);
+    }
+
+    // Drop user privileges
+    if (!config_.daemon_user.empty()) {
+        struct passwd* pwd = getpwnam(config_.daemon_user.c_str());
+        if (!pwd) {
+            Logger::error("User '{}' not found", config_.daemon_user);
+            return false;
+        }
+
+        if (setuid(pwd->pw_uid) < 0) {
+            Logger::error("Failed to set user ID to {}: {}",
+                         pwd->pw_uid, std::strerror(errno));
+            return false;
+        }
+        Logger::debug("Set user to '{}' (UID: {})", config_.daemon_user, pwd->pw_uid);
+    }
+
+    return true;
+}
+
+bool Application::create_pid_file() {
+    if (config_.daemon_pid_file.empty()) {
+        return true;  // No PID file requested
+    }
+
+    std::ofstream pid_file(config_.daemon_pid_file);
+    if (!pid_file) {
+        Logger::error("Failed to create PID file '{}'", config_.daemon_pid_file);
+        return false;
+    }
+
+    pid_file << getpid() << std::endl;
+    if (!pid_file) {
+        Logger::error("Failed to write to PID file '{}'", config_.daemon_pid_file);
+        return false;
+    }
+
+    Logger::debug("Created PID file '{}' with PID {}", config_.daemon_pid_file, getpid());
+    return true;
+}
+
+void Application::remove_pid_file() {
+    if (!config_.daemon_pid_file.empty()) {
+        if (unlink(config_.daemon_pid_file.c_str()) < 0) {
+            Logger::warn("Failed to remove PID file '{}': {}",
+                        config_.daemon_pid_file, std::strerror(errno));
+        } else {
+            Logger::debug("Removed PID file '{}'", config_.daemon_pid_file);
+        }
+    }
+}
+
+bool Application::redirect_standard_fds() {
+    // Redirect stdin to /dev/null
+    int fd = open("/dev/null", O_RDONLY);
+    if (fd < 0) {
+        Logger::error("Failed to open /dev/null for reading: {}", std::strerror(errno));
+        return false;
+    }
+
+    if (dup2(fd, STDIN_FILENO) < 0) {
+        Logger::error("Failed to redirect stdin: {}", std::strerror(errno));
+        close(fd);
+        return false;
+    }
+    close(fd);
+
+    // Redirect stdout and stderr
+    const char* output_target = "/dev/null";
+    if (!config_.daemon_log_file.empty()) {
+        output_target = config_.daemon_log_file.c_str();
+    }
+
+    fd = open(output_target, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (fd < 0) {
+        Logger::error("Failed to open '{}' for writing: {}", output_target, std::strerror(errno));
+        return false;
+    }
+
+    if (dup2(fd, STDOUT_FILENO) < 0) {
+        Logger::error("Failed to redirect stdout: {}", std::strerror(errno));
+        close(fd);
+        return false;
+    }
+
+    if (dup2(fd, STDERR_FILENO) < 0) {
+        Logger::error("Failed to redirect stderr: {}", std::strerror(errno));
+        close(fd);
+        return false;
+    }
+
+    close(fd);
+
+    if (!config_.daemon_log_file.empty()) {
+        Logger::debug("Redirected stdout/stderr to '{}'", config_.daemon_log_file);
+    } else {
+        Logger::debug("Redirected stdout/stderr to /dev/null");
+    }
+
+    return true;
+}
+
+void Application::close_all_fds() {
+    // Get maximum number of file descriptors
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_NOFILE, &rl) < 0) {
+        // If we can't get the limit, use a reasonable default
+        rl.rlim_max = 1024;
+    }
+
+    // Close all file descriptors except stdin, stdout, stderr
+    // We'll redirect these later
+    for (int fd = 3; fd < static_cast<int>(rl.rlim_max); ++fd) {
+        close(fd);  // Ignore errors - the FD might not be open
+    }
+
+    Logger::debug("Closed all file descriptors from 3 to {}", rl.rlim_max - 1);
+}
+
+// Static instance for signal handling
+Application* Application::signal_instance_ = nullptr;
+
+void Application::signal_handler_wrapper(int signal) {
+    if (signal_instance_) {
+        signal_instance_->handle_signal(signal);
+    }
+}
+
+void Application::setup_unix_signal_handlers() {
+    Logger::debug("Setting up UNIX signal handlers");
+
+    // Set the static instance for signal handling
+    signal_instance_ = this;
+
+    // Set up signal handlers for daemon mode
+    for (int sig : config_.handled_signals) {
+        if (signal(sig, signal_handler_wrapper) == SIG_ERR) {
+            Logger::warn("Failed to set signal handler for signal {}: {}", sig, std::strerror(errno));
+        } else {
+            Logger::debug("Set UNIX signal handler for signal {}", sig);
+        }
+    }
+}
+#endif
 
 } // namespace base

@@ -27,6 +27,14 @@
 #include <future>
 #include <exception>
 
+#if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <pwd.h>
+#include <grp.h>
+#endif
+
 namespace base {
 
 // Forward declarations
@@ -73,6 +81,16 @@ struct ApplicationConfig {
     std::string config_file = "";  // No default config file
     std::string config_app_name = "default";
 
+    // Daemonization options
+    bool daemonize = false;                    ///< Run as daemon process
+    std::string daemon_work_dir = "/";         ///< Working directory for daemon
+    std::string daemon_user = "";             ///< User to run daemon as (empty = current user)
+    std::string daemon_group = "";            ///< Group to run daemon as (empty = current group)
+    std::string daemon_pid_file = "";         ///< PID file path (empty = no PID file)
+    std::string daemon_log_file = "";         ///< Log file path for daemon (empty = use logger config)
+    mode_t daemon_umask = 022;                ///< File creation mask for daemon
+    bool daemon_close_fds = true;             ///< Close all file descriptors when daemonizing
+
     // Performance tuning
     std::chrono::microseconds message_processing_interval = std::chrono::microseconds(1000);
     bool enable_low_latency_mode = true;
@@ -83,6 +101,15 @@ struct ApplicationConfig {
     bool cli_enable_tcp = false;
     std::string cli_bind_address = "127.0.0.1";
     std::uint16_t cli_port = 8080;
+
+    // Command line argument handling
+    bool parse_command_line = true;          ///< Enable command line argument parsing
+    bool show_help_and_exit = false;        ///< Show help and exit (set by --help)
+    bool show_version_and_exit = false;     ///< Show version and exit (set by --version)
+    std::string custom_config_file = "";    ///< Config file from command line (--config)
+    std::string custom_log_level = "";      ///< Log level from command line (--log-level)
+    std::string custom_log_file = "";       ///< Log file from command line (--log-file)
+    bool force_foreground = false;          ///< Force foreground mode (--no-daemon)
 };
 
 /**
@@ -202,6 +229,39 @@ public:
      * @return Exit code (0 for success)
      */
     int run();
+
+    /**
+     * @brief Initialize and run the application with command line arguments
+     * @param argc Argument count
+     * @param argv Argument vector
+     * @return Exit code (0 for success)
+     */
+    int run(int argc, char* argv[]);
+
+    /**
+     * @brief Parse command line arguments
+     * @param argc Argument count
+     * @param argv Argument vector
+     * @return true if parsing successful and application should continue
+     */
+    bool parse_command_line_args(int argc, char* argv[]);
+
+    /**
+     * @brief Show application help and usage information
+     */
+    void show_help(const char* program_name) const;
+
+    /**
+     * @brief Show application version information
+     */
+    void show_version() const;
+
+    /**
+     * @brief Daemonize the application (UNIX only)
+     * @return true if daemonization successful, false otherwise
+     * @note This must be called before run() and only works on UNIX-like systems
+     */
+    bool daemonize();
 
     /**
      * @brief Request graceful shutdown
@@ -735,6 +795,7 @@ private:
     void stop_internal();
     void setup_signal_handling();
     void handle_signal(int signal);
+    void reset_signal_handling_after_fork();
     void start_worker_threads();
     void stop_worker_threads();
     void start_health_monitoring();
@@ -743,6 +804,22 @@ private:
     void execute_recurring_task(std::shared_ptr<RecurringTask> task);
     void change_state(ApplicationState new_state);
     void handle_exception(const std::exception& e);
+
+    // Command line argument parsing helpers
+    void apply_command_line_overrides();
+
+    // Daemonization helper methods
+#if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
+    bool daemonize_unix();
+    bool drop_privileges();
+    bool create_pid_file();
+    void remove_pid_file();
+    bool redirect_standard_fds();
+    void close_all_fds();
+    static void signal_handler_wrapper(int signal);
+    void setup_unix_signal_handlers();
+    static Application* signal_instance_;
+#endif
 };
 
 /**
@@ -752,7 +829,7 @@ private:
 int main(int argc, char* argv[]) { \
     try { \
         AppClass app; \
-        return app.run(); \
+        return app.run(argc, argv); \
     } catch (const std::exception& e) { \
         std::cerr << "Fatal error: " << e.what() << std::endl; \
         return EXIT_FAILURE; \
