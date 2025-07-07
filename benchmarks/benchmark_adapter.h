@@ -12,10 +12,7 @@
 #pragma once
 
 #include <benchmark/benchmark.h>
-#include "../include/logger.h"
-#include <chrono>
 #include <memory>
-#include <map>
 #include <string>
 
 namespace base {
@@ -77,16 +74,23 @@ public:
         state.counters["RowsPerSec"] = ::benchmark::Counter(rows, ::benchmark::Counter::kIsRate);
     }
 
-    static void add_memory_metrics(::benchmark::State& state, size_t bytes) {
-        state.counters["MemoryMB"] = ::benchmark::Counter(bytes / (1024*1024));
-        state.counters["BytesPerRow"] = ::benchmark::Counter(bytes / state.iterations());
-    }
-
     static void add_throughput_metrics(::benchmark::State& state, size_t operations, size_t data_size = 0) {
         state.counters["OpsPerSec"] = ::benchmark::Counter(operations, ::benchmark::Counter::kIsRate);
         if (data_size > 0) {
             state.counters["MBPerSec"] = ::benchmark::Counter(data_size, ::benchmark::Counter::kIsRate, ::benchmark::Counter::kIs1024);
         }
+    }
+
+    // Enhanced table metrics with memory tracking (uses Google Benchmark's SetBytesProcessed)
+    static void add_table_memory_metrics(::benchmark::State& state, size_t rows, size_t columns, size_t total_bytes_processed) {
+        add_table_metrics(state, rows, columns);
+
+        // Use Google Benchmark's built-in memory throughput calculation
+        state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * static_cast<int64_t>(total_bytes_processed));
+
+        // Add memory size info
+        state.counters["MemoryMB"] = ::benchmark::Counter(static_cast<double>(total_bytes_processed) / (1024*1024));
+        state.counters["BytesPerRow"] = ::benchmark::Counter(rows > 0 ? static_cast<double>(total_bytes_processed) / rows : 0);
     }
 };
 

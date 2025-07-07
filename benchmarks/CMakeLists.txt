@@ -30,6 +30,13 @@ target_link_libraries(application_benchmark
     benchmark::benchmark
 )
 
+# Memory tracking example
+add_executable(memory_example memory_example.cpp)
+target_link_libraries(memory_example
+    base
+    benchmark::benchmark
+)
+
 # Create output directory for results
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/benchmark_results)
 

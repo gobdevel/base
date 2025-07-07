@@ -164,7 +164,22 @@ static void BM_ApplicationCreation(benchmark::State& state) {
 
     state.counters["AppCreationsPerSec"] = benchmark::Counter(state.iterations(), benchmark::Counter::kIsRate);
 }
-BENCHMARK(BM_ApplicationCreation)->Unit(benchmark::kMicrosecond);
+static void BM_ApplicationCreation_WithMemory(benchmark::State& state) {
+    ensure_logger_initialized();
+
+    for (auto _ : state) {
+        auto app = std::make_unique<MinimalTestApp>();
+        benchmark::DoNotOptimize(app);
+        // Application destructor will handle cleanup
+    }
+
+    // Estimate memory usage per application instance
+    size_t estimated_app_size = sizeof(MinimalTestApp) + 1024; // rough estimate including overhead
+    state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * static_cast<int64_t>(estimated_app_size));
+    state.counters["AppCreationsPerSec"] = benchmark::Counter(state.iterations(), benchmark::Counter::kIsRate);
+    state.counters["EstimatedAppSize_KB"] = benchmark::Counter(static_cast<double>(estimated_app_size) / 1024);
+}
+BENCHMARK(BM_ApplicationCreation_WithMemory)->Unit(benchmark::kMicrosecond);
 
 static void BM_ApplicationInitialization(benchmark::State& state) {
     ensure_logger_initialized();
@@ -518,6 +533,9 @@ static void BM_ApplicationMemoryUsage(benchmark::State& state) {
 
     const int worker_threads = state.range(0);
 
+    // Estimate memory usage for reporting
+    size_t estimated_memory_per_iteration = worker_threads * 1024 * 1024; // Rough estimate: 1MB per worker thread
+
     for (auto _ : state) {
         auto app = std::make_unique<MultiThreadTestApp>(worker_threads);
 
@@ -564,8 +582,12 @@ static void BM_ApplicationMemoryUsage(benchmark::State& state) {
         benchmark::DoNotOptimize(app);
     }
 
+    // Use Google Benchmark's built-in memory tracking
+    state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * static_cast<int64_t>(estimated_memory_per_iteration));
+
     state.counters["WorkerThreads"] = benchmark::Counter(worker_threads);
     state.counters["ApplicationsPerSec"] = benchmark::Counter(state.iterations(), benchmark::Counter::kIsRate);
+    state.counters["EstimatedMemoryMB"] = benchmark::Counter(static_cast<double>(estimated_memory_per_iteration) / (1024*1024));
 
 }
 BENCHMARK(BM_ApplicationMemoryUsage)->Range(1, 16)->Unit(benchmark::kMillisecond);

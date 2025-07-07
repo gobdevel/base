@@ -6,8 +6,8 @@
 
 using namespace base;
 
-// Simple example demonstrating profile usage
-static void BM_TableInsert_Quick(benchmark::State& state) {
+// Example using the BENCHMARK_PROFILE macro for a single profile
+BENCHMARK_PROFILE(TableInsert, Quick) {
     auto scale = benchmark_adapter::ProfileManager::get_scale_factor(
         benchmark_adapter::Profile::Quick);
 
@@ -25,7 +25,8 @@ static void BM_TableInsert_Quick(benchmark::State& state) {
     benchmark_adapter::TableMetrics::add_table_metrics(state, scale, 1);
 }
 
-static void BM_TableInsert_Development(benchmark::State& state) {
+// Example of a simple query benchmark
+BENCHMARK_PROFILE(TableQuery, Development) {
     auto scale = benchmark_adapter::ProfileManager::get_scale_factor(
         benchmark_adapter::Profile::Development);
 
@@ -34,17 +35,20 @@ static void BM_TableInsert_Development(benchmark::State& state) {
 
     Table table(std::move(schema));
 
-    for (auto _ : state) {
-        for (size_t i = 0; i < scale / 10; ++i) { // Scale down for reasonable test time
-            table.insert_row({{"id", static_cast<long long>(i)}});
-        }
+    // Pre-populate table
+    for (size_t i = 0; i < scale; ++i) {
+        table.insert_row({{"id", static_cast<long long>(i)}});
     }
 
-    benchmark_adapter::TableMetrics::add_table_metrics(state, scale / 10, 1);
-}
+    for (auto _ : state) {
+        // Query operation using TableQuery
+        TableQuery query;
+        query.where("id", QueryOperator::GreaterThan, static_cast<long long>(scale/2));
+        auto results = table.query(query);
+        benchmark::DoNotOptimize(results);
+    }
 
-// Register benchmarks
-BENCHMARK(BM_TableInsert_Quick);
-BENCHMARK(BM_TableInsert_Development);
+    benchmark_adapter::TableMetrics::add_table_metrics(state, scale, 1);
+}
 
 BENCHMARK_MAIN();
