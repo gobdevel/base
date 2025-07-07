@@ -7,7 +7,6 @@
 # SPDX-License-Identifier: MIT
 ##
 
-import os
 from conan import ConanFile
 from conan.tools.cmake import CMakeToolchain, CMake, cmake_layout, CMakeDeps
 
@@ -29,20 +28,30 @@ class baseRecipe(ConanFile):
     options = {
         "shared": [True, False],
         "fPIC": [True, False],
-        "enable_tests": [True, False],
-        "enable_benchmarks": [True, False],
-        "enable_examples": [True, False],
+        "with_tests": [True, False],
+        "with_benchmarks": [True, False],
+        "with_examples": [True, False],
+        "with_docs": [True, False],
     }
     default_options = {
         "shared": False,
         "fPIC": True,
-        "enable_tests": True,
-        "enable_benchmarks": True,
-        "enable_examples": True,
+        "with_tests": False,
+        "with_benchmarks": False,
+        "with_examples": False,
+        "with_docs": False,
     }
 
     # Sources are located in the same place as this recipe, copy them to the recipe
-    exports_sources = "CMakeLists.txt", "src/*", "include/*", "tests/*"
+    exports_sources = (
+        "CMakeLists.txt",
+        "src/*",
+        "include/*",
+        "tests/*",
+        "benchmarks/*",
+        "examples/*",
+        "docs/*",
+    )
 
     def config_options(self):
         if self.settings.os == "Windows":
@@ -59,8 +68,12 @@ class baseRecipe(ConanFile):
             "asio/1.34.2", transitive_headers=True
         )  # Standalone ASIO (header-only)
         self.requires("nlohmann_json/3.11.3", transitive_headers=True)
-        self.test_requires("gtest/1.16.0")
-        self.test_requires("benchmark/1.9.1")
+
+        # Add test and benchmark dependencies when needed
+        if self.options.with_tests:
+            self.test_requires("gtest/1.16.0")
+        if self.options.with_benchmarks:
+            self.test_requires("benchmark/1.9.1")
 
     def layout(self):
         cmake_layout(self)
@@ -70,19 +83,16 @@ class baseRecipe(ConanFile):
         deps.generate()
         tc = CMakeToolchain(self)
         tc.variables["CMAKE_EXPORT_COMPILE_COMMANDS"] = True
-        tc.variables["BUILD_TESTING"] = self.options.enable_tests
-        tc.variables["BUILD_BENCHMARK"] = self.options.enable_benchmarks
-        tc.variables["BUILD_EXAMPLE"] = self.options.enable_examples
+        tc.variables["BUILD_TESTING"] = self.options.with_tests
+        tc.variables["BUILD_BENCHMARK"] = self.options.with_benchmarks
+        tc.variables["BUILD_EXAMPLE"] = self.options.with_examples
+        tc.variables["BUILD_DOCS"] = self.options.with_docs
         tc.generate()
 
     def build(self):
         cmake = CMake(self)
         cmake.configure()
         cmake.build()
-
-        if not self.conf.get("tools.build:skip_test", default=False):
-            test_folder = os.path.join("tests")
-            self.run(os.path.join(test_folder, "test_base"))
 
     def package(self):
         cmake = CMake(self)

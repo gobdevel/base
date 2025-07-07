@@ -21,17 +21,19 @@ add_library(base
 )
 target_include_directories(base PUBLIC include)
 
-if (NOT BUILD_TESTING STREQUAL OFF)
+if (BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests")
     add_subdirectory(tests)
 endif()
 
-if (NOT BUILD_EXAMPLE STREQUAL OFF)
+if (BUILD_EXAMPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples")
     add_subdirectory(examples)
 endif()
 
-if (NOT BUILD_BENCHMARK STREQUAL OFF)
+if (BUILD_BENCHMARK AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks")
     add_subdirectory(benchmarks)
 endif()
+
+# Note: docs directory contains markdown files only, no CMake build needed
 
 target_link_libraries(base
     spdlog::spdlog
@@ -40,4 +42,10 @@ target_link_libraries(base
     nlohmann_json::nlohmann_json
 )
 
-install(TARGETS base)
+# Install the library and headers
+install(TARGETS base
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
+    RUNTIME DESTINATION bin
+)
+install(DIRECTORY include/ DESTINATION include)
