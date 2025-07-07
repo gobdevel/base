@@ -38,9 +38,9 @@ bool ensure_logger_initialized() {
     if (!initialized) {
         // Initialize logger with minimal output for benchmarks
         base::LoggerConfig config;
-        config.level = base::LogLevel::Error; // Only show errors
+        config.level = base::LogLevel::Info; // Only show errors
         config.enable_console = false;        // Disable console output
-        config.enable_colors = false;         // Disable colors
+        config.enable_colors = false;        // Disable colors
         base::Logger::init(config);
         initialized = true;
     }
@@ -67,6 +67,38 @@ public:
         return config;
     }
 
+    void start_app() {
+        // Start application in a separate thread and
+        // return future for startup status
+        startup_future_ = std::async(std::launch::async, [this]() {
+            return run();
+        });
+
+        // Wait for application to reach running state
+        while (state() != ApplicationState::Running) {
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
+        }
+    }
+
+    void stop_app() {
+        // Shutdown the application gracefully
+        shutdown();
+        // Wait for the application to stop
+        while (state() != ApplicationState::Stopped) {
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
+        }
+
+        // Ensure the startup future is valid and get the result
+        if (startup_future_.valid()) {
+            try {
+                startup_future_.get(); // Ensure any exceptions are propagated
+            } catch (const std::exception& e) {
+                // Log any exceptions that occurred during startup
+                base::Logger::error("Application startup failed: {}", e.what());
+            }
+        }
+    }
+
 protected:
     bool on_initialize() override { initialized_ = true; return true; }
     bool on_start() override { started_ = true; return true; }
@@ -76,6 +108,7 @@ public:
     std::atomic<bool> initialized_{false};
     std::atomic<bool> started_{false};
     std::atomic<bool> stopped_{false};
+    std::future<int> startup_future_;
 };
 
 class MultiThreadTestApp : public Application {
@@ -93,6 +126,40 @@ public:
         config.enable_cli = false;
         return config;
     }
+
+    void start_app() {
+        // Start application in a separate thread and
+        // return future for startup status
+        startup_future_ = std::async(std::launch::async, [this]() {
+            return run();
+        });
+
+        // Wait for application to reach running state
+        while (state() != ApplicationState::Running) {
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
+        }
+    }
+
+    void stop_app() {
+        // Shutdown the application gracefully
+        shutdown();
+        // Wait for the application to stop
+        while (state() != ApplicationState::Stopped) {
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
+        }
+
+        // Ensure the startup future is valid and get the result
+        if (startup_future_.valid()) {
+            try {
+                startup_future_.get(); // Ensure any exceptions are propagated
+            } catch (const std::exception& e) {
+                // Log any exceptions that occurred during startup
+                base::Logger::error("Application startup failed: {}", e.what());
+            }
+        }
+    }
+    private:
+        std::future<int> startup_future_;
 };
 
 class TestComponent : public ApplicationComponent {
@@ -130,24 +197,7 @@ private:
 // Helper Functions for Safe Benchmark Cleanup
 // ============================================================================
 
-// Helper function to safely shutdown application and join thread
-void safe_shutdown_app(std::unique_ptr<MinimalTestApp>& app, std::thread& app_thread) {
-    if (app) {
-        app->force_shutdown();
-    }
-    if (app_thread.joinable()) {
-        app_thread.join();
-    }
-}
 
-void safe_shutdown_app(std::unique_ptr<MultiThreadTestApp>& app, std::thread& app_thread) {
-    if (app) {
-        app->force_shutdown();
-    }
-    if (app_thread.joinable()) {
-        app_thread.join();
-    }
-}
 
 // ============================================================================
 // Application Lifecycle Benchmarks
@@ -189,23 +239,12 @@ static void BM_ApplicationInitialization(benchmark::State& state) {
 
         auto start_time = std::chrono::high_resolution_clock::now();
 
-        // Start application in a separate thread and shutdown immediately
-        std::thread app_thread([&app]() {
-            app->run();
-        });
-
-        // Wait for initialization
-        while (!app->initialized_.load()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(1));
-        }
+        app->start_app();
 
         auto end_time = std::chrono::high_resolution_clock::now();
 
         // Proper shutdown sequence
-        app->force_shutdown();
-        if (app_thread.joinable()) {
-            app_thread.join();
-        }
+        app->stop_app();
 
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
         benchmark::DoNotOptimize(duration);
@@ -222,28 +261,11 @@ static void BM_ApplicationStartupShutdown(benchmark::State& state) {
         auto app = std::make_unique<MinimalTestApp>();
 
         auto start_time = std::chrono::high_resolution_clock::now();
+        app->start_app();
 
-        std::thread app_thread([&app]() {
-            app->run();
-        });
-
-        // Wait for startup to complete
-        while (!app->started_.load()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(1));
-        }
-
-        app->force_shutdown();
-
-        while (!app->stopped_.load()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(1));
-        }
+        app->stop_app();
 
         auto end_time = std::chrono::high_resolution_clock::now();
-
-        if (app_thread.joinable()) {
-            app_thread.join();
-        }
-
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
         benchmark::DoNotOptimize(duration);
     }
@@ -264,15 +286,8 @@ static void BM_TaskScheduling(benchmark::State& state) {
     for (auto _ : state) {
         // Create a fresh application instance for each iteration
         auto app = std::make_unique<MinimalTestApp>();
-        std::thread app_thread([&app]() {
-            app->run();
-        });
 
-        // Wait for startup
-        while (!app->started_.load()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(1));
-        }
-
+        app->start_app();
         std::atomic<int> completed_tasks{0};
 
         auto start_time = std::chrono::high_resolution_clock::now();
@@ -293,10 +308,7 @@ static void BM_TaskScheduling(benchmark::State& state) {
         benchmark::DoNotOptimize(duration);
 
         // Clean up
-        app->force_shutdown();
-        if (app_thread.joinable()) {
-            app_thread.join();
-        }
+        app->stop_app();
     }
 
     state.counters["TasksPerIteration"] = benchmark::Counter(tasks_per_iteration);
@@ -312,14 +324,8 @@ static void BM_TaskPriorityScheduling(benchmark::State& state) {
     for (auto _ : state) {
         // Create a fresh application instance for each iteration
         auto app = std::make_unique<MinimalTestApp>();
-        std::thread app_thread([&app]() {
-            app->run();
-        });
 
-        while (!app->started_.load()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(1));
-        }
-
+        app->start_app();
         std::atomic<int> completed_tasks{0};
 
         auto start_time = std::chrono::high_resolution_clock::now();
@@ -352,10 +358,7 @@ static void BM_TaskPriorityScheduling(benchmark::State& state) {
         benchmark::DoNotOptimize(duration);
 
         // Clean up
-        app->force_shutdown();
-        if (app_thread.joinable()) {
-            app_thread.join();
-        }
+        app->stop_app();
     }
 
     state.counters["TotalTasks"] = benchmark::Counter(tasks_per_priority * 4);
@@ -363,7 +366,6 @@ static void BM_TaskPriorityScheduling(benchmark::State& state) {
 }
 BENCHMARK(BM_TaskPriorityScheduling)->Range(1, 10)->Unit(benchmark::kMicrosecond);
 
-/*
 static void BM_RecurringTaskScheduling(benchmark::State& state) {
     ensure_logger_initialized();
 
@@ -372,13 +374,7 @@ static void BM_RecurringTaskScheduling(benchmark::State& state) {
     for (auto _ : state) {
         state.PauseTiming();
         auto app = std::make_unique<MinimalTestApp>();
-        std::thread app_thread([&app]() {
-            app->run();
-        });
-
-        while (!app->started_.load()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(10));
-        }
+        app->start_app();
 
         std::vector<std::size_t> task_ids;
         std::atomic<int> execution_count{0};
@@ -407,7 +403,8 @@ static void BM_RecurringTaskScheduling(benchmark::State& state) {
         benchmark::DoNotOptimize(duration);
 
         state.PauseTiming();
-        safe_shutdown_app(app, app_thread);
+
+        app->stop_app();
         state.ResumeTiming();
     }
 
@@ -416,7 +413,6 @@ static void BM_RecurringTaskScheduling(benchmark::State& state) {
 
 }
 BENCHMARK(BM_RecurringTaskScheduling)->Range(1, 100)->Unit(benchmark::kMicrosecond);
-*/
 
 /*
 // ============================================================================
@@ -455,20 +451,14 @@ static void BM_ComponentManagement(benchmark::State& state) {
             app->add_component(std::make_unique<TestComponent>("component_" + std::to_string(i)));
         }
 
-        std::thread app_thread([&app]() {
-            app->run();
-        });
+        // Start application in a separate thread
+        app->start_app();
 
-        // Wait for startup (components should be initialized and started)
-        while (!app->started_.load()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(10));
-        }
+        // A brief sleep to allow the application to stabilize
+        std::this_thread::sleep_for(std::chrono::microseconds(10));
 
-        app->force_shutdown();
-        if (app_thread.joinable()) {
-            app_thread.join();
-        }
-
+        // stop the application
+        app->stop_app();
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
         benchmark::DoNotOptimize(duration);
@@ -478,7 +468,7 @@ static void BM_ComponentManagement(benchmark::State& state) {
     state.counters["ComponentOpsPerSec"] = benchmark::Counter(components_per_iteration * state.iterations(), benchmark::Counter::kIsRate);
 
 }
-// BENCHMARK(BM_ComponentManagement)->Range(1, 100)->Unit(benchmark::kMicrosecond);
+BENCHMARK(BM_ComponentManagement)->Range(1, 100)->Unit(benchmark::kMicrosecond);
 
 static void BM_ComponentLookup(benchmark::State& state) {
     ensure_logger_initialized();
@@ -493,13 +483,8 @@ static void BM_ComponentLookup(benchmark::State& state) {
         app->add_component(std::make_unique<TestComponent>("component_" + std::to_string(i)));
     }
 
-    std::thread app_thread([&app]() {
-        app->run();
-    });
-
-    while (!app->started_.load()) {
-        std::this_thread::sleep_for(std::chrono::microseconds(10));
-    }
+    // Start application in a separate thread
+    app->start_app();
 
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -514,10 +499,7 @@ static void BM_ComponentLookup(benchmark::State& state) {
     }
 
     // Cleanup after all iterations
-    app->force_shutdown();
-    if (app_thread.joinable()) {
-        app_thread.join();
-    }
+    app->stop_app();
 
     state.counters["ComponentCount"] = benchmark::Counter(num_components);
     state.counters["LookupsPerSec"] = benchmark::Counter(state.iterations(), benchmark::Counter::kIsRate);
@@ -544,13 +526,7 @@ static void BM_ApplicationMemoryUsage(benchmark::State& state) {
             app->add_component(std::make_unique<TestComponent>("comp_" + std::to_string(i)));
         }
 
-        std::thread app_thread([&app]() {
-            app->run();
-        });
-
-        while (app->state() != ApplicationState::Running) {
-            std::this_thread::sleep_for(std::chrono::microseconds(10));
-        }
+        app->start_app();
 
         // Create additional managed threads
         std::vector<std::shared_ptr<Application::ManagedThread>> threads;
@@ -577,7 +553,7 @@ static void BM_ApplicationMemoryUsage(benchmark::State& state) {
             thread->join();
         }
 
-        safe_shutdown_app(app, app_thread);
+        app->stop_app();
 
         benchmark::DoNotOptimize(app);
     }
@@ -599,13 +575,7 @@ static void BM_ConcurrentTaskExecution(benchmark::State& state) {
 
     for (auto _ : state) {
         auto app = std::make_unique<MultiThreadTestApp>(8);
-        std::thread app_thread([&app]() {
-            app->run();
-        });
-
-        while (app->state() != ApplicationState::Running) {
-            std::this_thread::sleep_for(std::chrono::microseconds(10));
-        }
+        app->start_app();
 
         std::atomic<int> completed_tasks{0};
 
@@ -631,7 +601,7 @@ static void BM_ConcurrentTaskExecution(benchmark::State& state) {
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
         benchmark::DoNotOptimize(duration);
 
-        safe_shutdown_app(app, app_thread);
+        app->stop_app();
     }
 
     state.counters["ConcurrentTasks"] = benchmark::Counter(concurrent_tasks);
@@ -685,13 +655,7 @@ static void BM_ErrorHandlerPerformance(benchmark::State& state) {
             error_count.fetch_add(1, std::memory_order_relaxed);
         });
 
-        std::thread app_thread([&app]() {
-            app->run();
-        });
-
-        while (!app->started_.load()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(10));
-        }
+        app->start_app();
 
         auto start_time = std::chrono::high_resolution_clock::now();
 
@@ -711,7 +675,7 @@ static void BM_ErrorHandlerPerformance(benchmark::State& state) {
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
         benchmark::DoNotOptimize(duration);
 
-        safe_shutdown_app(app, app_thread);
+        app->stop_app();
     }
 
     state.counters["ErrorTasks"] = benchmark::Counter(error_tasks);

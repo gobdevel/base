@@ -85,12 +85,12 @@ int Application::run() {
             return EXIT_FAILURE;
         }
 
-        Logger::info("Application '{}' started successfully", config_.name);
-        change_state(ApplicationState::Running);
-
         // Run the event loop
         Logger::debug("Starting event loop with {} worker threads", config_.worker_threads);
         start_worker_threads();
+
+        Logger::info("Application '{}' started successfully", config_.name);
+        change_state(ApplicationState::Running);
 
         // Wait for shutdown signal
         {
