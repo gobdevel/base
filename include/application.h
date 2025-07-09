@@ -11,13 +11,14 @@
 #include "logger.h"
 #include "config.h"
 #include "cli.h"
-#include "messaging.h"
+#include "thread_messaging.h"
 
 #include <asio.hpp>
 #include <asio/signal_set.hpp>
 
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <functional>
 #include <memory>
 #include <string>
@@ -26,6 +27,8 @@
 #include <vector>
 #include <future>
 #include <exception>
+#include <stop_token>
+#include <unordered_map>
 
 #if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
 #include <sys/types.h>
@@ -63,15 +66,10 @@ struct ApplicationConfig {
     std::string description = "Base Application";
 
     // Threading configuration
-    std::size_t worker_threads = std::thread::hardware_concurrency();
-    bool use_dedicated_io_thread = true;
+    std::size_t worker_threads = std::jthread::hardware_concurrency();
 
     // Signal handling
     std::vector<int> handled_signals = {SIGINT, SIGTERM, SIGHUP, SIGUSR1, SIGUSR2};
-
-    // Lifecycle timeouts
-    std::chrono::milliseconds startup_timeout = std::chrono::milliseconds(30000);
-    std::chrono::milliseconds shutdown_timeout = std::chrono::milliseconds(10000);
 
     // Health check
     bool enable_health_check = true;
@@ -90,10 +88,6 @@ struct ApplicationConfig {
     std::string daemon_log_file = "";         ///< Log file path for daemon (empty = use logger config)
     mode_t daemon_umask = 022;                ///< File creation mask for daemon
     bool daemon_close_fds = true;             ///< Close all file descriptors when daemonizing
-
-    // Performance tuning
-    std::chrono::microseconds message_processing_interval = std::chrono::microseconds(1000);
-    bool enable_low_latency_mode = true;
 
     // CLI configuration
     bool enable_cli = false;
@@ -130,6 +124,45 @@ enum class TaskPriority {
  */
 class Application;
 class CLI;
+
+/**
+ * @brief Forward declarations
+ */
+class Application;
+class CLI;
+class ManagedThreadBase; // Forward declare the base class
+
+/**
+ * @brief Base interface for managed threads
+ */
+class ManagedThreadBase {
+public:
+    virtual ~ManagedThreadBase() = default;
+
+    // Essential interface for thread factory
+    virtual const std::string& name() const noexcept = 0;
+    virtual bool stop_requested() const noexcept = 0;
+    virtual void request_stop() noexcept = 0;
+    virtual void post_task(std::function<void()> task) = 0;
+};
+
+/**
+ * @brief Interface for creating managed threads - enables dependency injection
+ */
+class ThreadFactory {
+public:
+    virtual ~ThreadFactory() = default;
+
+    /**
+     * @brief Create a managed thread
+     * @param name Thread name for logging/debugging
+     * @param thread_func Function to run in the thread
+     * @return Shared pointer to created thread (actual type will be Application::ManagedThread)
+     */
+    virtual std::shared_ptr<ManagedThreadBase> create_thread(
+        std::string name,
+        std::function<void(ManagedThreadBase&)> thread_func = nullptr) = 0;
+};
 
 /**
  * @brief Application component interface for modular components
@@ -202,7 +235,7 @@ public:
  * }
  * @endcode
  */
-class Application : public SingletonBase<Application> {
+class Application : public SingletonBase<Application>, public ThreadFactory {
 public:
     using SignalHandler = std::function<void(int signal)>;
     using TaskFunction = std::function<void()>;
@@ -395,14 +428,16 @@ public:
     // Thread Management API
 
     /**
-     * @brief Managed thread handle for custom event loops
+     * @brief Simplified event-driven managed thread using std::jthread's built-in capabilities
      */
-    class ManagedThread {
+    class ManagedThread : public ManagedThreadBase {
     public:
-        using ThreadFunction = std::function<void(asio::io_context&)>;
+        using ThreadFunction = std::function<void(ManagedThread&)>;
 
-        ManagedThread(std::string name, ThreadFunction func);
-        ~ManagedThread();
+        explicit ManagedThread(std::string name, ThreadFunction func = nullptr);
+
+        // std::jthread automatically joins in destructor - no manual join() needed
+        ~ManagedThread() = default;
 
         // Non-copyable, non-movable
         ManagedThread(const ManagedThread&) = delete;
@@ -426,25 +461,30 @@ public:
         const std::string& name() const noexcept { return name_; }
 
         /**
-         * @brief Check if thread is running
+         * @brief Get the thread's stop token
          */
-        bool is_running() const noexcept { return running_.load(); }
+        std::stop_token get_stop_token() const noexcept { return thread_.get_stop_token(); }
 
         /**
-         * @brief Post a task to this thread's event loop
-         * @param task Task function to execute with automatic exception handling
-         * @note Always provides exception safety for reliable operation
+         * @brief Request thread to stop (uses jthread's cooperative cancellation)
+         */
+        void request_stop() noexcept { thread_.request_stop(); }
+
+        /**
+         * @brief Check if stop was requested
+         */
+        bool stop_requested() const noexcept { return thread_.get_stop_token().stop_requested(); }
+
+        /**
+         * @brief Post a task to this thread's event loop (wakes up thread immediately)
          */
         void post_task(std::function<void()> task);
 
         /**
-         * @brief Send a typed message to this thread
+         * @brief Send a typed message to this thread (wakes up thread immediately)
          */
         template<MessageType T>
         bool send_message(T data, MessagePriority priority = MessagePriority::Normal) {
-            if (!messaging_context_) {
-                return false;
-            }
             return messaging_context_->send_message(std::move(data), priority);
         }
 
@@ -453,9 +493,7 @@ public:
          */
         template<MessageType T>
         void subscribe_to_messages(MessageHandler<T> handler) {
-            if (messaging_context_) {
-                messaging_context_->subscribe<T>(std::move(handler));
-            }
+            messaging_context_->subscribe(std::move(handler));
         }
 
         /**
@@ -463,168 +501,35 @@ public:
          */
         template<MessageType T>
         void unsubscribe_from_messages() {
-            if (messaging_context_) {
-                messaging_context_->unsubscribe<T>();
-            }
+            messaging_context_->unsubscribe<T>();
         }
 
         /**
-         * @brief Get pending message count
-         */
-        std::size_t pending_message_count() const {
-            return messaging_context_ ? messaging_context_->pending_message_count() : 0;
-        }
-
-        /**
-         * @brief Stop the thread gracefully
-         */
-        void stop();
-
-        /**
-         * @brief Wait for thread to finish
-         */
-        void join();
-
-    private:
-        void run();
-        void schedule_message_processing();
-
-        std::string name_;
-        asio::io_context io_context_;
-        std::unique_ptr<asio::executor_work_guard<asio::io_context::executor_type>> work_guard_;
-        std::thread thread_;
-        std::atomic<bool> running_{false};
-        ThreadFunction user_function_;
-        std::shared_ptr<ThreadMessagingContext> messaging_context_;
-        std::shared_ptr<asio::steady_timer> message_timer_;
-    };
-
-    /**
-     * @brief Event-driven managed thread with immediate message processing
-     */
-    class EventDrivenManagedThread {
-    public:
-        using ThreadFunction = std::function<void(EventDrivenManagedThread&)>;
-
-        EventDrivenManagedThread(std::string name, ThreadFunction func = nullptr);
-        ~EventDrivenManagedThread();
-
-        // Non-copyable, non-movable
-        EventDrivenManagedThread(const EventDrivenManagedThread&) = delete;
-        EventDrivenManagedThread& operator=(const EventDrivenManagedThread&) = delete;
-        EventDrivenManagedThread(EventDrivenManagedThread&&) = delete;
-        EventDrivenManagedThread& operator=(EventDrivenManagedThread&&) = delete;
-
-        /**
-         * @brief Get the thread's IO context
-         */
-        asio::io_context& io_context() noexcept { return io_context_; }
-
-        /**
-         * @brief Get the thread's executor
-         */
-        asio::any_io_executor executor() noexcept { return io_context_.get_executor(); }
-
-        /**
-         * @brief Get thread name
-         */
-        const std::string& name() const noexcept { return name_; }
-
-        /**
-         * @brief Check if thread is running
-         */
-        bool is_running() const noexcept { return running_.load(); }
-
-        /**
-         * @brief Post a task to this thread's event loop
-         */
-        void post_task(std::function<void()> task);
-
-        /**
-         * @brief Send a typed message to this thread (immediate notification)
-         */
-        template<MessageType T>
-        bool send_message(T data, MessagePriority priority = MessagePriority::Normal) {
-            if (!messaging_context_) {
-                return false;
-            }
-            return messaging_context_->send_message(std::move(data), priority);
-        }
-
-        /**
-         * @brief Subscribe to messages of a specific type
-         */
-        template<MessageType T>
-        void subscribe_to_messages(MessageHandler<T> handler) {
-            if (messaging_context_) {
-                messaging_context_->subscribe<T>(std::move(handler));
-            }
-        }
-
-        /**
-         * @brief Unsubscribe from messages of a specific type
-         */
-        template<MessageType T>
-        void unsubscribe_from_messages() {
-            if (messaging_context_) {
-                messaging_context_->unsubscribe<T>();
-            }
-        }
-
-        /**
-         * @brief Stop the thread gracefully
-         */
-        void stop();
-
-        /**
-         * @brief Join the thread (wait for completion)
-         */
-        void join();
-
-        /**
-         * @brief Get current queue size
+         * @brief Get current message queue size
          */
         std::size_t queue_size() const {
-            return messaging_context_ ? messaging_context_->pending_message_count() : 0;
+            return messaging_context_->pending_message_count();
         }
 
     private:
-        void thread_main();
+        void thread_main(std::stop_token stop_token);
 
-        std::string name_;
-        ThreadFunction func_;
-        std::atomic<bool> running_{false};
-        std::thread thread_;
+        const std::string name_;
+        const ThreadFunction func_;
         asio::io_context io_context_;
         std::unique_ptr<asio::executor_work_guard<asio::io_context::executor_type>> work_guard_;
-        std::unique_ptr<ThreadMessagingContext> messaging_context_;
+        std::shared_ptr<ThreadMessagingContext> messaging_context_;
+        std::jthread thread_;  // Last member - destructor auto-joins
     };
 
     /**
-     * @brief Create and start a managed thread with its own event loop
+     * @brief Create an event-driven managed thread (starts automatically)
      * @param name Thread name for logging/debugging
-     * @param thread_func Function to run in the thread (receives io_context reference)
+     * @param thread_func Optional function to run in the thread (receives ManagedThread reference)
      * @return Shared pointer to managed thread
      */
-    std::shared_ptr<ManagedThread> create_thread(std::string name,
-                                                ManagedThread::ThreadFunction thread_func);
-
-    /**
-     * @brief Create a simple worker thread (convenience method)
-     * @param name Thread name for logging/debugging
-     * @return Shared pointer to managed thread
-     *
-     * @note This is equivalent to create_thread(name, [](asio::io_context&){})
-     *       Use create_thread() directly if you need custom initialization
-     */
-    std::shared_ptr<ManagedThread> create_worker_thread(std::string name);
-
-    /**
-     * @brief Create an event-driven worker thread with immediate message processing
-     * @param name Thread name for logging/debugging
-     * @return Shared pointer to event-driven managed thread
-     */
-    std::shared_ptr<EventDrivenManagedThread> create_event_driven_thread(std::string name);
+    std::shared_ptr<ManagedThreadBase> create_thread(std::string name,
+                                                std::function<void(ManagedThreadBase&)> thread_func = nullptr) override;
 
     /**
      * @brief Get the number of managed threads
@@ -632,14 +537,14 @@ public:
     std::size_t managed_thread_count() const;
 
     /**
-     * @brief Stop all managed threads gracefully
+     * @brief Stop all managed threads (uses jthread's cooperative cancellation)
      */
     void stop_all_managed_threads();
 
     /**
-     * @brief Wait for all managed threads to finish
+     * @brief Check if any managed thread has been requested to stop
      */
-    void join_all_managed_threads();
+    bool any_managed_thread_stop_requested() const;
 
     /**
      * @brief Get managed thread by name
@@ -662,7 +567,7 @@ public:
     template<MessageType T>
     bool send_message_to_thread(const std::string& target_thread, T data,
                                MessagePriority priority = MessagePriority::Normal) {
-        return MessagingBus::instance().send_to_thread(target_thread, std::move(data), priority);
+        return InterThreadMessagingBus::instance().send_to_thread(target_thread, std::move(data), priority);
     }
 
     /**
@@ -672,13 +577,13 @@ public:
      */
     template<MessageType T>
     void broadcast_message(T data, MessagePriority priority = MessagePriority::Normal) {
-        MessagingBus::instance().broadcast(std::move(data), priority);
+        InterThreadMessagingBus::instance().broadcast(std::move(data), priority);
     }
 
     /**
      * @brief Get messaging bus instance
      */
-    MessagingBus& messaging_bus() { return MessagingBus::instance(); }
+    InterThreadMessagingBus& messaging_bus() { return InterThreadMessagingBus::instance(); }
 
     // CLI Management
 
@@ -766,7 +671,7 @@ private:
     asio::io_context io_context_;
     std::unique_ptr<asio::executor_work_guard<asio::io_context::executor_type>> work_guard_;
     asio::signal_set signals_;
-    std::vector<std::thread> worker_threads_;
+    std::vector<std::jthread> worker_threads_;
 
     // Component management
     std::vector<std::unique_ptr<ApplicationComponent>> components_;
@@ -833,6 +738,288 @@ private:
     void setup_unix_signal_handlers();
     static Application* signal_instance_;
 #endif
+};
+
+/**
+ * @brief Base class for threaded components that run on ManagedThread
+ *
+ * Provides a high-level interface for creating thread-based components with:
+ * - Automatic thread lifecycle management
+ * - Built-in message handling infrastructure
+ * - Event-driven architecture with ASIO integration
+ * - Clean separation between infrastructure and business logic
+ *
+ * Usage:
+ * @code
+ * class MyService : public ThreadedComponent {
+ * public:
+ *     MyService() : ThreadedComponent("MyService") {}
+ *
+ * protected:
+ *     bool on_initialize() override {
+ *         // Setup message handlers, initialize state
+ *         subscribe_to_messages<MyMessage>([this](const MyMessage& msg) {
+ *             handle_my_message(msg);
+ *         });
+ *         return true;
+ *     }
+ *
+ *     bool on_start() override {
+ *         // Start business logic, timers, etc.
+ *         setup_periodic_work();
+ *         return true;
+ *     }
+ *
+ *     void on_stop() override {
+ *         // Cleanup business logic
+ *         cleanup_resources();
+ *     }
+ * };
+ * @endcode
+ */
+class ThreadedComponent {
+public:
+    /**
+     * @brief Construct threaded component with name
+     * @param name Component name for logging and identification
+     */
+    explicit ThreadedComponent(std::string name);
+
+    /**
+     * @brief Virtual destructor - automatically stops the component
+     */
+    virtual ~ThreadedComponent();
+
+    // Non-copyable, non-movable
+    ThreadedComponent(const ThreadedComponent&) = delete;
+    ThreadedComponent& operator=(const ThreadedComponent&) = delete;
+    ThreadedComponent(ThreadedComponent&&) = delete;
+    ThreadedComponent& operator=(ThreadedComponent&&) = delete;
+
+    /**
+     * @brief Initialize the threaded component
+     * @param thread_factory Factory for creating managed threads
+     * @return true if initialization successful
+     */
+    bool initialize(ThreadFactory& thread_factory);
+
+    /**
+     * @brief Start the threaded component (creates and starts the managed thread)
+     * @return true if start successful
+     */
+    bool start();
+
+    /**
+     * @brief Stop the threaded component (gracefully stops the managed thread)
+     * @return true if stop successful
+     */
+    bool stop();
+
+    /**
+     * @brief Get component name
+     */
+    const std::string& name() const noexcept { return name_; }
+
+    /**
+     * @brief Check if component is running
+     */
+    bool is_running() const noexcept { return running_.load(); }
+
+    /**
+     * @brief Get the managed thread (may be nullptr if not started)
+     */
+    ManagedThreadBase* managed_thread() const noexcept { return managed_thread_.get(); }
+
+    /**
+     * @brief Get the concrete managed thread (may be nullptr if not started)
+     */
+    Application::ManagedThread* concrete_managed_thread() const noexcept {
+        return static_cast<Application::ManagedThread*>(managed_thread_.get());
+    }
+
+    /**
+     * @brief Send a typed message to this component's thread
+     * @param data Message data
+     * @param priority Message priority
+     * @return true if message was sent successfully
+     */
+    template<MessageType T>
+    bool send_message(T data, MessagePriority priority = MessagePriority::Normal) {
+        auto concrete_thread = concrete_managed_thread();
+        if (!concrete_thread) {
+            return false;
+        }
+        return concrete_thread->send_message(std::move(data), priority);
+    }
+
+    /**
+     * @brief Post a task to this component's thread
+     * @param task Task function to execute
+     */
+    void post_task(std::function<void()> task) {
+        if (managed_thread_) {
+            managed_thread_->post_task(std::move(task));
+        }
+    }
+
+    /**
+     * @brief Get the component's IO context (only valid when running)
+     */
+    asio::io_context* io_context() const noexcept {
+        auto concrete_thread = concrete_managed_thread();
+        return concrete_thread ? &concrete_thread->io_context() : nullptr;
+    }
+
+    /**
+     * @brief Get the component's executor (only valid when running)
+     */
+    asio::any_io_executor executor() const {
+        auto concrete_thread = concrete_managed_thread();
+        if (!concrete_thread) {
+            throw std::runtime_error("ThreadedComponent not running - no executor available");
+        }
+        return concrete_thread->executor();
+    }
+
+protected:
+    /**
+     * @brief Override for component-specific initialization
+     * Called in the main thread before the managed thread is created.
+     * Use this to set up message handlers, initialize non-thread-specific state, etc.
+     * @return true if initialization successful
+     */
+    virtual bool on_initialize() { return true; }
+
+    /**
+     * @brief Override for component-specific startup logic
+     * Called in the component's managed thread after it starts.
+     * Use this to start timers, setup periodic tasks, begin business logic, etc.
+     * @return true if start successful
+     */
+    virtual bool on_start() { return true; }
+
+    /**
+     * @brief Override for component-specific shutdown logic
+     * Called in the component's managed thread during shutdown.
+     * Use this to cleanup resources, cancel timers, finish ongoing work, etc.
+     */
+    virtual void on_stop() {}
+
+    /**
+     * @brief Override for component health checking
+     * Called periodically if health monitoring is enabled.
+     * @return true if component is healthy
+     */
+    virtual bool on_health_check() { return true; }
+
+    /**
+     * @brief Subscribe to messages of a specific type
+     * Can be called from on_initialize() or later during runtime.
+     * @param handler Function to handle messages of type T
+     */
+    template<MessageType T>
+    void subscribe_to_messages(MessageHandler<T> handler) {
+        auto concrete_thread = concrete_managed_thread();
+        if (concrete_thread) {
+            concrete_thread->subscribe_to_messages<T>(std::move(handler));
+        } else {
+            // Store handler for later registration when thread starts
+            pending_subscriptions_.emplace_back([this, handler = std::move(handler)]() mutable {
+                auto concrete_thread = concrete_managed_thread();
+                if (concrete_thread) {
+                    concrete_thread->subscribe_to_messages<T>(std::move(handler));
+                }
+            });
+        }
+    }
+
+    /**
+     * @brief Unsubscribe from messages of a specific type
+     */
+    template<MessageType T>
+    void unsubscribe_from_messages() {
+        auto concrete_thread = concrete_managed_thread();
+        if (concrete_thread) {
+            concrete_thread->unsubscribe_from_messages<T>();
+        }
+    }
+
+    /**
+     * @brief Schedule a timer that executes repeatedly
+     * @param interval Time between executions
+     * @param callback Function to execute
+     * @return Timer ID for cancellation, or 0 if component not running
+     */
+    std::size_t schedule_timer(std::chrono::milliseconds interval, std::function<void()> callback) {
+        auto concrete_thread = concrete_managed_thread();
+        if (!concrete_thread) {
+            return 0;
+        }
+
+        auto timer_id = next_timer_id_++;
+        auto timer = std::make_shared<asio::steady_timer>(concrete_thread->io_context());
+
+        timers_[timer_id] = timer;
+
+        // Use a shared_ptr to the recursive function to avoid capture issues
+        auto schedule_func = std::make_shared<std::function<void()>>();
+        *schedule_func = [this, timer, interval, callback, timer_id, schedule_func]() {
+            if (!running_.load() || timers_.find(timer_id) == timers_.end()) {
+                return; // Timer was cancelled or component stopped
+            }
+
+            timer->expires_after(interval);
+            timer->async_wait([this, callback, schedule_func](const asio::error_code& ec) {
+                if (!ec && running_.load()) {
+                    try {
+                        callback();
+                    } catch (const std::exception& e) {
+                        Logger::error("Exception in timer callback for '{}': {}", name_, e.what());
+                    }
+                    (*schedule_func)();
+                }
+            });
+        };
+
+        // Start the timer
+        post_task(*schedule_func);
+        return timer_id;
+    }
+
+    /**
+     * @brief Cancel a scheduled timer
+     * @param timer_id Timer ID returned by schedule_timer
+     */
+    void cancel_timer(std::size_t timer_id) {
+        auto it = timers_.find(timer_id);
+        if (it != timers_.end()) {
+            it->second->cancel();
+            timers_.erase(it);
+        }
+    }
+
+    /**
+     * @brief Check if stop was requested
+     */
+    bool stop_requested() const noexcept {
+        return managed_thread_ ? managed_thread_->stop_requested() : true;
+    }
+
+private:
+    void thread_main(Application::ManagedThread& thread);
+    void apply_pending_subscriptions();
+
+    const std::string name_;
+    ThreadFactory* thread_factory_{nullptr};
+    std::shared_ptr<ManagedThreadBase> managed_thread_;
+    std::atomic<bool> running_{false};
+
+    // Timer management
+    std::unordered_map<std::size_t, std::shared_ptr<asio::steady_timer>> timers_;
+    std::atomic<std::size_t> next_timer_id_{1};
+
+    // Deferred message subscription setup
+    std::vector<std::function<void()>> pending_subscriptions_;
 };
 
 /**

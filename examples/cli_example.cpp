@@ -28,7 +28,7 @@ using namespace base;
  */
 class CLIExampleApp : public Application {
 private:
-    std::shared_ptr<ManagedThread> worker_thread_;
+    std::shared_ptr<ManagedThreadBase> worker_thread_;
     std::atomic<int> task_counter_{0};
     std::atomic<bool> worker_running_{false};
 
@@ -61,12 +61,15 @@ protected:
         Logger::info("Starting CLI example application");
 
         // Create a worker thread to demonstrate thread inspection
-        worker_thread_ = create_thread("example_worker", [this](asio::io_context& io_ctx) {
+        worker_thread_ = create_thread("example_worker", [this](ManagedThreadBase& thread_base) {
             worker_running_.store(true);
             Logger::info("Worker thread started");
 
+            // Cast to Application::ManagedThread to access io_context
+            auto& thread = static_cast<Application::ManagedThread&>(thread_base);
+
             // Schedule periodic work to demonstrate activity
-            auto timer = std::make_shared<asio::steady_timer>(io_ctx);
+            auto timer = std::make_shared<asio::steady_timer>(thread.io_context());
             schedule_worker_task(timer);
         });
 

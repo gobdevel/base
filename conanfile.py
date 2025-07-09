@@ -83,10 +83,10 @@ class baseRecipe(ConanFile):
         deps.generate()
         tc = CMakeToolchain(self)
         tc.variables["CMAKE_EXPORT_COMPILE_COMMANDS"] = True
-        tc.variables["BUILD_TESTING"] = self.options.with_tests
-        tc.variables["BUILD_BENCHMARK"] = self.options.with_benchmarks
-        tc.variables["BUILD_EXAMPLE"] = self.options.with_examples
-        tc.variables["BUILD_DOCS"] = self.options.with_docs
+        tc.variables["BUILD_TESTING"] = bool(self.options.with_tests)
+        tc.variables["BUILD_BENCHMARK"] = bool(self.options.with_benchmarks)
+        tc.variables["BUILD_EXAMPLE"] = bool(self.options.with_examples)
+        tc.variables["BUILD_DOCS"] = bool(self.options.with_docs)
         tc.generate()
 
     def build(self):

@@ -15,7 +15,6 @@ add_library(base
     src/logger.cpp
     src/config.cpp
     src/application.cpp
-    src/messaging.cpp
     src/cli.cpp
     src/tables.cpp
 )

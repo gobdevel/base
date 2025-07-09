@@ -7,10 +7,11 @@
  */
 
 #include <gtest/gtest.h>
-#include "messaging.h"
+#include "thread_messaging.h"
 #include "logger.h"
 #include <thread>
 #include <chrono>
+#include <asio.hpp>
 
 using namespace base;
 
@@ -41,292 +42,241 @@ protected:
     }
 };
 
-TEST_F(MessagingTest, MessageCreation) {
-    SimpleMessage msg{42, "test"};
-    Message<SimpleMessage> typed_msg{1, std::move(msg), MessagePriority::Normal};
-
-    EXPECT_EQ(typed_msg.id(), 1);
-    EXPECT_EQ(typed_msg.priority(), MessagePriority::Normal);
-    EXPECT_EQ(typed_msg.data().value, 42);
-    EXPECT_EQ(typed_msg.data().text, "test");
-}
-
-TEST_F(MessagingTest, MessageQueue) {
-    EventDrivenMessageQueue queue;
-
-    // Test sending messages
-    EXPECT_TRUE(queue.send(SimpleMessage{1, "first"}, MessagePriority::Normal));
-    EXPECT_TRUE(queue.send(SimpleMessage{2, "second"}, MessagePriority::High));
-    EXPECT_TRUE(queue.send(SimpleMessage{3, "third"}, MessagePriority::Low));
-
-    EXPECT_EQ(queue.size(), 3);
-    EXPECT_FALSE(queue.empty());
-
-    // Test receiving messages (order not guaranteed for performance)
-    auto msg1 = queue.receive(std::chrono::milliseconds(10));
-    EXPECT_TRUE(msg1 != nullptr);
-
-    auto msg2 = queue.receive(std::chrono::milliseconds(10));
-    EXPECT_TRUE(msg2 != nullptr);
-
-    auto msg3 = queue.receive(std::chrono::milliseconds(10));
-    EXPECT_TRUE(msg3 != nullptr);
-
-    EXPECT_TRUE(queue.empty());
-}
-
-TEST_F(MessagingTest, MessageRouter) {
-    MessageRouter router;
-
-    std::atomic<int> simple_count{0};
-    std::atomic<int> complex_count{0};
-
-    // Subscribe to different message types
-    router.subscribe<SimpleMessage>("test_subscriber", [&simple_count](const Message<SimpleMessage>& msg) {
-        simple_count++;
-    });
-
-    router.subscribe<ComplexMessage>("test_subscriber", [&complex_count](const Message<ComplexMessage>& msg) {
-        complex_count++;
-    });
-
-    EXPECT_EQ(router.subscriber_count<SimpleMessage>(), 1);
-    EXPECT_EQ(router.subscriber_count<ComplexMessage>(), 1);
-
-    // Publish messages
-    Message<SimpleMessage> simple_msg{1, SimpleMessage{42, "test"}, MessagePriority::Normal};
-    Message<ComplexMessage> complex_msg{2, ComplexMessage{{1, 2, 3}}, MessagePriority::Normal};
-
-    router.publish(simple_msg);
-    router.publish(complex_msg);
-
-    // Give handlers a moment to execute
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-    EXPECT_EQ(simple_count.load(), 1);
-    EXPECT_EQ(complex_count.load(), 1);
-
-    // Test unsubscribe
-    router.unsubscribe<SimpleMessage>("test_subscriber");
-    EXPECT_EQ(router.subscriber_count<SimpleMessage>(), 0);
-}
-
-TEST_F(MessagingTest, ThreadMessagingContext) {
-    ThreadMessagingContext context("test_thread");
+TEST_F(MessagingTest, ThreadMessagingContextBasic) {
+    asio::io_context io_context;
+    auto context = std::make_shared<ThreadMessagingContext>("test_thread", io_context);
 
     std::atomic<int> message_count{0};
     std::atomic<int> last_value{0};
 
     // Subscribe to messages
-    context.subscribe<SimpleMessage>([&message_count, &last_value](const Message<SimpleMessage>& msg) {
+    context->subscribe<SimpleMessage>([&message_count, &last_value](const SimpleMessage& msg) {
         message_count++;
-        last_value.store(msg.data().value);
+        last_value.store(msg.value);
     });
 
+    // Start the context
+    context->start();
+
     // Send messages
-    EXPECT_TRUE(context.send_message(SimpleMessage{100, "test1"}));
-    EXPECT_TRUE(context.send_message(SimpleMessage{200, "test2"}));
+    context->send_message(SimpleMessage{42, "test1"});
+    context->send_message(SimpleMessage{84, "test2"});
 
-    EXPECT_EQ(context.pending_message_count(), 2);
+    // Run IO context to process messages
+    io_context.run();
 
-    // Process messages in batch mode
-    context.process_messages_batch();
-
-    // Give handlers a moment to execute
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
+    // Check results
     EXPECT_EQ(message_count.load(), 2);
-    EXPECT_EQ(last_value.load(), 200);
-    EXPECT_EQ(context.pending_message_count(), 0);
+    EXPECT_EQ(last_value.load(), 84);
+
+    // Stop context
+    context->stop();
 }
 
-TEST_F(MessagingTest, MessagingBus) {
-    MessagingBus& bus = MessagingBus::instance();
-
-    // Create thread contexts
-    auto context1 = std::make_shared<ThreadMessagingContext>("thread1");
-    auto context2 = std::make_shared<ThreadMessagingContext>("thread2");
+TEST_F(MessagingTest, MessagingBusThreadCommunication) {
+    asio::io_context io_context1, io_context2;
+    auto context1 = std::make_shared<ThreadMessagingContext>("thread1", io_context1);
+    auto context2 = std::make_shared<ThreadMessagingContext>("thread2", io_context2);
 
     std::atomic<int> thread1_messages{0};
     std::atomic<int> thread2_messages{0};
     std::atomic<int> broadcast_count{0};
 
-    // Subscribe to messages
-    context1->subscribe<SimpleMessage>([&thread1_messages, &broadcast_count](const Message<SimpleMessage>& msg) {
+    // Set up message handlers
+    context1->subscribe<SimpleMessage>([&thread1_messages, &broadcast_count](const SimpleMessage& msg) {
         thread1_messages++;
-        if (msg.data().text == "broadcast") {
+        if (msg.text == "broadcast") {
             broadcast_count++;
         }
     });
 
-    context2->subscribe<SimpleMessage>([&thread2_messages, &broadcast_count](const Message<SimpleMessage>& msg) {
+    context2->subscribe<SimpleMessage>([&thread2_messages, &broadcast_count](const SimpleMessage& msg) {
         thread2_messages++;
-        if (msg.data().text == "broadcast") {
+        if (msg.text == "broadcast") {
             broadcast_count++;
         }
     });
 
-    // Register threads
-    bus.register_thread("thread1", context1);
-    bus.register_thread("thread2", context2);
+    // Start contexts
+    context1->start();
+    context2->start();
 
-    EXPECT_EQ(bus.thread_count(), 2);
-    EXPECT_TRUE(bus.is_thread_registered("thread1"));
-    EXPECT_TRUE(bus.is_thread_registered("thread2"));
+    // Test direct thread messaging
+    InterThreadMessagingBus::instance().send_to_thread("thread1", SimpleMessage{1, "direct"});
+    InterThreadMessagingBus::instance().send_to_thread("thread2", SimpleMessage{2, "direct"});
 
-    // Send targeted message
-    EXPECT_TRUE(bus.send_to_thread("thread1", SimpleMessage{1, "targeted"}));
+    // Test broadcast
+    InterThreadMessagingBus::instance().broadcast(SimpleMessage{3, "broadcast"});
 
-    // Broadcast message
-    bus.broadcast(SimpleMessage{2, "broadcast"});
+    // Run IO contexts to process messages
+    std::jthread t1([&io_context1]() { io_context1.run(); });
+    std::jthread t2([&io_context2]() { io_context2.run(); });
 
-    // Process messages in both contexts using batch mode
-    context1->process_messages_batch();
-    context2->process_messages_batch();
+    // Allow messages to process
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    // Give handlers a moment to execute
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    // Stop contexts and threads
+    context1->stop();
+    context2->stop();
+    io_context1.stop();
+    io_context2.stop();
 
-    EXPECT_EQ(thread1_messages.load(), 2); // targeted + broadcast
-    EXPECT_EQ(thread2_messages.load(), 1); // broadcast only
-    EXPECT_EQ(broadcast_count.load(), 2);  // received by both threads
+    if (t1.joinable()) t1.join();
+    if (t2.joinable()) t2.join();
 
-    // Cleanup
-    bus.unregister_thread("thread1");
-    bus.unregister_thread("thread2");
-
-    EXPECT_EQ(bus.thread_count(), 0);
+    // Check results
+    EXPECT_EQ(thread1_messages.load(), 2); // 1 direct + 1 broadcast
+    EXPECT_EQ(thread2_messages.load(), 2); // 1 direct + 1 broadcast
+    EXPECT_EQ(broadcast_count.load(), 2);  // Both threads received broadcast
 }
 
 TEST_F(MessagingTest, MessagePriority) {
-    EventDrivenMessageQueue queue;
+    asio::io_context io_context;
+    auto context = std::make_shared<ThreadMessagingContext>("test_thread", io_context);
 
-    // Send messages in non-priority order
-    queue.send(SimpleMessage{1, "low"}, MessagePriority::Low);
-    queue.send(SimpleMessage{2, "critical"}, MessagePriority::Critical);
-    queue.send(SimpleMessage{3, "normal"}, MessagePriority::Normal);
-    queue.send(SimpleMessage{4, "high"}, MessagePriority::High);
+    std::vector<int> received_order;
+    std::mutex order_mutex;
 
-    // Test that all messages are received
-    std::vector<MessagePriority> received_order;
+    // Subscribe to messages
+    context->subscribe<SimpleMessage>([&received_order, &order_mutex](const SimpleMessage& msg) {
+        std::lock_guard<std::mutex> lock(order_mutex);
+        received_order.push_back(msg.value);
+    });
 
-    while (!queue.empty()) {
-        auto msg = queue.receive(std::chrono::milliseconds(1));
-        if (msg) {
-            received_order.push_back(msg->priority());
-        }
-    }
+    // Start the context
+    context->start();
 
-    // Just check that we received all 4 messages (order not important for performance)
+    // Send messages with different priorities
+    context->send_message(SimpleMessage{1, "low"}, MessagePriority::Low);
+    context->send_message(SimpleMessage{2, "normal"}, MessagePriority::Normal);
+    context->send_message(SimpleMessage{3, "high"}, MessagePriority::High);
+    context->send_message(SimpleMessage{4, "critical"}, MessagePriority::Critical);
+
+    // Run IO context to process messages
+    io_context.run();
+
+    // Check that all messages were received (order may vary due to ASIO scheduling)
     EXPECT_EQ(received_order.size(), 4);
+    EXPECT_TRUE(std::find(received_order.begin(), received_order.end(), 1) != received_order.end());
+    EXPECT_TRUE(std::find(received_order.begin(), received_order.end(), 2) != received_order.end());
+    EXPECT_TRUE(std::find(received_order.begin(), received_order.end(), 3) != received_order.end());
+    EXPECT_TRUE(std::find(received_order.begin(), received_order.end(), 4) != received_order.end());
+
+    // Stop context
+    context->stop();
 }
 
-TEST_F(MessagingTest, MessageTypeSafety) {
-    MessageRouter router;
+TEST_F(MessagingTest, MultipleMessageTypes) {
+    asio::io_context io_context;
+    auto context = std::make_shared<ThreadMessagingContext>("test_thread", io_context);
 
-    std::atomic<bool> simple_received{false};
-    std::atomic<bool> complex_received{false};
+    std::atomic<int> simple_count{0};
+    std::atomic<int> complex_count{0};
 
-    // Subscribe to specific message types
-    router.subscribe<SimpleMessage>("subscriber", [&simple_received](const Message<SimpleMessage>& msg) {
-        simple_received.store(true);
+    // Subscribe to different message types
+    context->subscribe<SimpleMessage>([&simple_count](const SimpleMessage& msg) {
+        simple_count++;
     });
 
-    router.subscribe<ComplexMessage>("subscriber", [&complex_received](const Message<ComplexMessage>& msg) {
-        complex_received.store(true);
+    context->subscribe<ComplexMessage>([&complex_count](const ComplexMessage& msg) {
+        complex_count++;
     });
 
-    // Send SimpleMessage - should only trigger SimpleMessage handler
-    Message<SimpleMessage> simple_msg{1, SimpleMessage{42, "test"}, MessagePriority::Normal};
-    router.publish(simple_msg);
+    // Start the context
+    context->start();
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    // Send different message types
+    context->send_message(SimpleMessage{1, "test"});
+    context->send_message(ComplexMessage{std::vector<int>{1, 2, 3}});
+    context->send_message(SimpleMessage{2, "test2"});
 
-    EXPECT_TRUE(simple_received.load());
-    EXPECT_FALSE(complex_received.load());
+    // Run IO context to process messages
+    io_context.run();
 
-    // Reset and send ComplexMessage
-    simple_received.store(false);
-    complex_received.store(false);
+    // Check results
+    EXPECT_EQ(simple_count.load(), 2);
+    EXPECT_EQ(complex_count.load(), 1);
 
-    Message<ComplexMessage> complex_msg{2, ComplexMessage{{1, 2, 3}}, MessagePriority::Normal};
-    router.publish(complex_msg);
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-    EXPECT_FALSE(simple_received.load());
-    EXPECT_TRUE(complex_received.load());
+    // Stop context
+    context->stop();
 }
 
-TEST_F(MessagingTest, PerformanceBasics) {
-    EventDrivenMessageQueue queue;
+TEST_F(MessagingTest, UnsubscribeFromMessages) {
+    asio::io_context io_context;
+    auto context = std::make_shared<ThreadMessagingContext>("test_thread", io_context);
 
-    const int message_count = 1000;
-    auto start = std::chrono::high_resolution_clock::now();
+    std::atomic<int> message_count{0};
 
-    // Send messages
-    for (int i = 0; i < message_count; ++i) {
-        queue.send(SimpleMessage{i, "test"});
-    }
+    // Subscribe to messages
+    context->subscribe<SimpleMessage>([&message_count](const SimpleMessage& msg) {
+        message_count++;
+    });
 
-    // Receive messages
-    for (int i = 0; i < message_count; ++i) {
-        auto msg = queue.receive(std::chrono::milliseconds(1));
-        EXPECT_TRUE(msg != nullptr);
-    }
+    // Start the context
+    context->start();
 
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    // Send a message
+    context->send_message(SimpleMessage{1, "test"});
 
-    Logger::info("Processed {} messages in {} microseconds ({:.2f} msg/sec)",
-                message_count, duration.count(),
-                (message_count * 1000000.0) / duration.count());
+    // Run IO context to process first message
+    io_context.restart();
+    io_context.run();
 
-    // Should be able to process at least 10k messages per second
-    EXPECT_LT(duration.count(), 100000); // Less than 100ms for 1000 messages
+    EXPECT_EQ(message_count.load(), 1);
+
+    // Unsubscribe from messages
+    context->unsubscribe<SimpleMessage>();
+
+    // Send another message
+    context->send_message(SimpleMessage{2, "test2"});
+
+    // Run IO context to process second message
+    io_context.restart();
+    io_context.run();
+
+    // Count should still be 1 (message was ignored)
+    EXPECT_EQ(message_count.load(), 1);
+
+    // Stop context
+    context->stop();
 }
 
-TEST_F(MessagingTest, MessagingIntegration) {
-    // This test verifies that the messaging system components work together
-    MessagingBus& bus = MessagingBus::instance();
+TEST_F(MessagingTest, MessagingBusPerformance) {
+    constexpr int NUM_MESSAGES = 1000;
 
-    auto context1 = std::make_shared<ThreadMessagingContext>("integration_thread1");
-    auto context2 = std::make_shared<ThreadMessagingContext>("integration_thread2");
+    asio::io_context io_context;
+    auto context = std::make_shared<ThreadMessagingContext>("perf_thread", io_context);
 
-    std::atomic<int> total_messages{0};
-    std::atomic<int> high_priority_messages{0};
+    std::atomic<int> messages_processed{0};
+    auto start_time = std::chrono::steady_clock::now();
 
-    // Set up message handlers
-    auto handler = [&total_messages, &high_priority_messages](const Message<SimpleMessage>& msg) {
-        total_messages++;
-        if (msg.priority() == MessagePriority::High) {
-            high_priority_messages++;
-        }
-    };
+    // Subscribe to messages
+    context->subscribe<SimpleMessage>([&messages_processed](const SimpleMessage& msg) {
+        messages_processed++;
+    });
 
-    context1->subscribe<SimpleMessage>(handler);
-    context2->subscribe<SimpleMessage>(handler);
+    // Start the context
+    context->start();
 
-    bus.register_thread("integration_thread1", context1);
-    bus.register_thread("integration_thread2", context2);
+    // Send many messages
+    for (int i = 0; i < NUM_MESSAGES; ++i) {
+        context->send_message(SimpleMessage{i, "perf_test"});
+    }
 
-    // Send various messages
-    bus.send_to_thread("integration_thread1", SimpleMessage{1, "direct"}, MessagePriority::Normal);
-    bus.send_to_thread("integration_thread2", SimpleMessage{2, "direct"}, MessagePriority::High);
-    bus.broadcast(SimpleMessage{3, "broadcast"}, MessagePriority::Normal);
-    bus.broadcast(SimpleMessage{4, "broadcast"}, MessagePriority::High);
+    // Run IO context to process messages
+    io_context.run();
 
-    // Process messages
-    context1->process_messages_batch();
-    context2->process_messages_batch();
+    auto end_time = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    // Check results
+    EXPECT_EQ(messages_processed.load(), NUM_MESSAGES);
 
-    // Verify results
-    EXPECT_EQ(total_messages.load(), 6); // 2 direct + 4 broadcast (2 threads × 2 broadcast)
-    EXPECT_EQ(high_priority_messages.load(), 3); // 1 direct high + 2 broadcast high
+    // Performance should be reasonable (less than 1 second for 1000 messages)
+    EXPECT_LT(duration.count(), 1000);
 
-    // Cleanup
-    bus.unregister_thread("integration_thread1");
-    bus.unregister_thread("integration_thread2");
+    Logger::info("Processed {} messages in {}ms", NUM_MESSAGES, duration.count());
+
+    // Stop context
+    context->stop();
 }

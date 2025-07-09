@@ -15,6 +15,10 @@ target_link_libraries(component_logging_example base)
 add_executable(config_example config_example.cpp)
 target_link_libraries(config_example base)
 
+# ThreadedComponent base class demonstration
+add_executable(threaded_component_example threaded_component_example.cpp)
+target_link_libraries(threaded_component_example base)
+
 # === System Integration Examples ===
 
 # Inter-thread messaging demonstration
@@ -43,6 +47,7 @@ set(ALL_EXAMPLES
     application_example
     component_logging_example
     config_example
+    threaded_component_example
     messaging_example
     cli_example
     table_example

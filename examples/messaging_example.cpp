@@ -10,7 +10,7 @@
  */
 
 #include "application.h"
-#include "messaging.h"
+#include "thread_messaging.h"
 #include <thread>
 #include <random>
 #include <iostream>
@@ -64,8 +64,7 @@ void setup_message_handlers(Application& app) {
     // Order processor handles incoming orders
     auto* order_processor = app.get_managed_thread("order-processor");
     if (order_processor) {
-        order_processor->subscribe_to_messages<OrderMessage>([&app](const Message<OrderMessage>& msg) {
-            const auto& order = msg.data();
+        order_processor->subscribe_to_messages<OrderMessage>([&app](const OrderMessage& order) {
             Logger::info("Processing order #{}: {} x {} @ ${:.2f}",
                         order.order_id, order.quantity, order.product, order.price);
 
@@ -81,10 +80,7 @@ void setup_message_handlers(Application& app) {
 
     // Payment service handles payment requests
     auto* payment_service = app.get_managed_thread("payment-service");
-    if (payment_service) {
-        payment_service->subscribe_to_messages<PaymentMessage>([&app](const Message<PaymentMessage>& msg) {
-            const auto& payment = msg.data();
-
+    if (payment_service) {        payment_service->subscribe_to_messages<PaymentMessage>([&app](const PaymentMessage& payment) {
             // Simulate payment processing
             std::random_device rd;
             std::mt19937 gen(rd());
@@ -94,7 +90,7 @@ void setup_message_handlers(Application& app) {
 
             if (success) {
                 Logger::info("Payment successful for order #{}: ${:.2f}",
-                            payment.order_id, payment.amount);
+                           payment.order_id, payment.amount);
 
                 app.send_message_to_thread("notification-service",
                     NotificationMessage{payment.order_id,
@@ -113,9 +109,7 @@ void setup_message_handlers(Application& app) {
     // Inventory service handles inventory checks
     auto* inventory_service = app.get_managed_thread("inventory-service");
     if (inventory_service) {
-        inventory_service->subscribe_to_messages<InventoryMessage>([&app](const Message<InventoryMessage>& msg) {
-            const auto& inventory = msg.data();
-
+        inventory_service->subscribe_to_messages<InventoryMessage>([&app](const InventoryMessage& inventory) {
             // Simulate inventory check
             std::random_device rd;
             std::mt19937 gen(rd());
@@ -144,8 +138,7 @@ void setup_message_handlers(Application& app) {
     // Notification service handles all notifications
     auto* notification_service = app.get_managed_thread("notification-service");
     if (notification_service) {
-        notification_service->subscribe_to_messages<NotificationMessage>([](const Message<NotificationMessage>& msg) {
-            const auto& notification = msg.data();
+        notification_service->subscribe_to_messages<NotificationMessage>([](const NotificationMessage& notification) {
             Logger::info("📧 Notification for order #{} [{}]: {}",
                         notification.order_id, notification.notification_type, notification.message);
 
@@ -179,19 +172,21 @@ int main() {
         Application app(config);
 
         // Create specialized threads for different services
-        auto order_processor = app.create_thread("order-processor", [](asio::io_context& io_ctx) {
+        auto order_processor = app.create_thread("order-processor", [](ManagedThreadBase& thread_ctx) {
             Logger::info("Order processor thread started");
         });
 
-        auto payment_service = app.create_thread("payment-service", [](asio::io_context& io_ctx) {
+        auto payment_service = app.create_thread("payment-service", [](ManagedThreadBase& thread_ctx) {
             Logger::info("Payment service thread started");
         });
 
-        auto inventory_service = app.create_thread("inventory-service", [](asio::io_context& io_ctx) {
+        auto inventory_service = app.create_thread("inventory-service", [](ManagedThreadBase& thread_ctx) {
             Logger::info("Inventory service thread started");
         });
 
-        auto notification_service = app.create_worker_thread("notification-service");
+        auto notification_service = app.create_thread("notification-service", [](ManagedThreadBase& thread) {
+            // Simple worker thread that just runs the event loop
+        });
 
         Logger::info("Created {} specialized service threads", app.managed_thread_count());
 
@@ -226,24 +221,24 @@ int main() {
 
         // Check pending messages in each thread
         if (auto* thread = app.get_managed_thread("order-processor")) {
-            Logger::info("Order processor pending: {}", thread->pending_message_count());
+            Logger::info("Order processor pending: {}", thread->queue_size());
         }
         if (auto* thread = app.get_managed_thread("payment-service")) {
-            Logger::info("Payment service pending: {}", thread->pending_message_count());
+            Logger::info("Payment service pending: {}", thread->queue_size());
         }
         if (auto* thread = app.get_managed_thread("inventory-service")) {
-            Logger::info("Inventory service pending: {}", thread->pending_message_count());
+            Logger::info("Inventory service pending: {}", thread->queue_size());
         }
         if (auto* thread = app.get_managed_thread("notification-service")) {
-            Logger::info("Notification service pending: {}", thread->pending_message_count());
+            Logger::info("Notification service pending: {}", thread->queue_size());
         }
 
         Logger::info("======================");
         Logger::info("Demo completed successfully!");
 
-        // Clean shutdown
+        // Clean shutdown using std::jthread's automatic management
         app.stop_all_managed_threads();
-        app.join_all_managed_threads();
+        // No manual join needed - std::jthread auto-joins when threads are destroyed
 
         Logger::shutdown();
         return 0;

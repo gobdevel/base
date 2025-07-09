@@ -38,9 +38,7 @@ Application::Application(ApplicationConfig config)
     }
 #endif
     Logger::info("Application '{}' created (version: {})", config_.name, config_.version);
-    Logger::debug("Worker threads: {}, IO thread: {}",
-                  config_.worker_threads,
-                  config_.use_dedicated_io_thread ? "dedicated" : "shared");
+    Logger::debug("Worker threads: {}", config_.worker_threads);
 }
 
 Application::~Application() {
@@ -292,6 +290,9 @@ void Application::force_shutdown() {
     Logger::warn("Force shutdown requested");
     change_state(ApplicationState::Stopping);
 
+    // Request immediate stop for all managed threads
+    stop_all_managed_threads();
+
     // Stop the IO context immediately
     io_context_.stop();
 
@@ -301,7 +302,7 @@ void Application::force_shutdown() {
 
 bool Application::initialize_internal() {
     Logger::debug("Initializing application components");
-    change_state(ApplicationState::Initialized);
+    // State will be set to Initialized at the end of successful initialization
 
     try {
         // Load configuration if specified
@@ -356,6 +357,7 @@ bool Application::initialize_internal() {
         }
 
         Logger::info("Application initialization completed");
+        change_state(ApplicationState::Initialized);  // ✅ State change at END
         return true;
 
     } catch (const std::exception& e) {
@@ -367,7 +369,7 @@ bool Application::initialize_internal() {
 
 bool Application::start_internal() {
     Logger::debug("Starting application components");
-    change_state(ApplicationState::Starting);
+    change_state(ApplicationState::Starting);  // ✅ Starting state is appropriate here
 
     try {
         // Start components
@@ -460,9 +462,16 @@ void Application::stop_internal() {
             }
         }
 
-        // Stop and cleanup managed threads
+        // Stop and cleanup managed threads using jthread's cooperative cancellation
         stop_all_managed_threads();
-        join_all_managed_threads();
+
+        // Give threads a moment to respond to stop tokens, then clear them
+        // jthread destructors will automatically join when vector is cleared
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        {
+            std::lock_guard<std::mutex> lock(managed_threads_mutex_);
+            managed_threads_.clear();  // jthreads auto-join in their destructors
+        }
 
         // Stop worker threads
         stop_worker_threads();
@@ -587,20 +596,27 @@ void Application::handle_signal(int signal) {
 }
 
 void Application::start_worker_threads() {
-    Logger::debug("Starting {} worker threads", config_.worker_threads);
-
     for (std::size_t i = 0; i < config_.worker_threads; ++i) {
-        worker_threads_.emplace_back([this, i]() {
-            Logger::trace("Worker thread {} started", i);
-
+        worker_threads_.emplace_back([this, i](std::stop_token stop_token) {
             try {
+                // Set up stop token callback to gracefully stop the IO context
+                std::stop_callback stop_callback(stop_token, [this]() {
+                    // This is THREAD-SAFE regardless of which thread calls it
+                    io_context_.stop();
+                });
+
+                Logger::debug("Worker thread {} starting", i);
+
+                // Pure event-driven execution: Block in run() until work_guard_ is released
+                // The work_guard_ keeps the IO context alive, so run() will block waiting for events
                 io_context_.run();
+
+                Logger::debug("Worker thread {} stopping", i);
+
             } catch (const std::exception& e) {
                 Logger::error("Exception in worker thread {}: {}", i, e.what());
                 handle_exception(e);
             }
-
-            Logger::trace("Worker thread {} stopped", i);
         });
     }
 }
@@ -608,20 +624,21 @@ void Application::start_worker_threads() {
 void Application::stop_worker_threads() {
     Logger::debug("Stopping worker threads");
 
-    // Release work guard to allow IO context to stop
+    // Release work guard to allow IO context to stop naturally
+    // This will cause io_context_.run() to return in all worker threads
     work_guard_.reset();
 
-    // Stop the IO context
+    // Also explicitly stop the IO context to wake up any blocking operations
     io_context_.stop();
 
-    // Wait for all worker threads to finish
+    // Request stop for all worker threads (this triggers the stop_callback)
     for (auto& thread : worker_threads_) {
-        if (thread.joinable()) {
-            thread.join();
-        }
+        thread.request_stop();
     }
 
+    // Wait for all worker threads to finish (jthread automatically joins on destruction)
     worker_threads_.clear();
+
     Logger::debug("All worker threads stopped");
 }
 
@@ -917,88 +934,55 @@ void Application::on_error(const std::exception& error) {
     Logger::error("Default error handler: {}", error.what());
 }
 
-// ManagedThread Implementation
+// ManagedThread Implementation (Simplified with std::jthread)
 
 Application::ManagedThread::ManagedThread(std::string name, ThreadFunction func)
     : name_(std::move(name))
-    , user_function_(std::move(func))
-    , messaging_context_(std::make_shared<ThreadMessagingContext>(name_))
+    , func_(std::move(func))
+    , work_guard_(std::make_unique<asio::executor_work_guard<asio::io_context::executor_type>>(io_context_.get_executor()))
+    , messaging_context_(std::make_shared<ThreadMessagingContext>(name_, io_context_))
+    , thread_([this](std::stop_token stop_token) { thread_main(stop_token); })
 {
-    Logger::debug("Creating managed thread: {}", name_);
-
-    // Register with messaging bus
-    MessagingBus::instance().register_thread(name_, messaging_context_);
-
-    // Create work guard to keep IO context alive
-    work_guard_ = std::make_unique<asio::executor_work_guard<asio::io_context::executor_type>>(
-        asio::make_work_guard(io_context_));
-
-    // Start the thread
-    running_.store(true);
-    thread_ = std::thread([this]() { run(); });
-
     Logger::info("Created managed thread: {}", name_);
 }
 
-Application::ManagedThread::~ManagedThread() {
-    if (running_.load()) {
-        Logger::debug("Stopping managed thread '{}' in destructor", name_);
-        stop();
-        join();
-    }
-
-    // Unregister from messaging bus
-    MessagingBus::instance().unregister_thread(name_);
-
-    Logger::debug("Managed thread '{}' destroyed", name_);
-}
-
-void Application::ManagedThread::run() {
-    Logger::trace("Managed thread '{}' event loop starting", name_);
+void Application::ManagedThread::thread_main(std::stop_token stop_token) {
+    Logger::info("Managed thread '{}' starting", name_);
 
     try {
-        // Set up periodic message processing
-        if (messaging_context_) {
-            message_timer_ = std::make_shared<asio::steady_timer>(io_context_);
-            schedule_message_processing();
+        // Start messaging context (register with global bus)
+        messaging_context_->start();
+
+        // Set up stop token handler to integrate with ASIO event system
+        std::stop_callback stop_callback(stop_token, [this]() {
+            work_guard_.reset();  // Release work guard to allow io_context to stop
+            io_context_.stop();
+        });
+
+        // Run user function if provided
+        if (func_) {
+            asio::post(io_context_, [this]() {
+                try {
+                    func_(*this);  // Simplified: only pass ManagedThread reference
+                } catch (const std::exception& e) {
+                    Logger::error("Exception in thread function '{}': {}", name_, e.what());
+                }
+            });
         }
 
-        // Call user function with the IO context
-        if (user_function_) {
-            user_function_(io_context_);
-        }
-
-        // Run the event loop
+        // Run the event loop until stop is requested
         io_context_.run();
 
     } catch (const std::exception& e) {
         Logger::error("Exception in managed thread '{}': {}", name_, e.what());
     }
 
-    running_.store(false);
-    Logger::trace("Managed thread '{}' event loop stopped", name_);
-}
-
-void Application::ManagedThread::schedule_message_processing() {
-    if (!running_.load() || !messaging_context_ || !message_timer_) {
-        return;
-    }
-
-    // Process messages in high-performance batch mode
-    messaging_context_->process_messages_batch();
-
-    // Use configurable interval for message processing
-    // Default: 1ms for high-throughput, low-latency scenarios
-    message_timer_->expires_after(std::chrono::microseconds(1000));
-    message_timer_->async_wait([this](const asio::error_code& ec) {
-        if (!ec && running_.load()) {
-            schedule_message_processing();
-        }
-    });
+    // Clean up
+    messaging_context_->stop();
+    Logger::info("Managed thread '{}' stopped", name_);
 }
 
 void Application::ManagedThread::post_task(std::function<void()> task) {
-    // Consistent with main application post_task behavior
     asio::post(io_context_, [task = std::move(task)]() {
         try {
             task();
@@ -1010,157 +994,26 @@ void Application::ManagedThread::post_task(std::function<void()> task) {
     });
 }
 
-void Application::ManagedThread::stop() {
-    if (running_.load()) {
-        Logger::debug("Stopping managed thread '{}'", name_);
-
-        // Release work guard to allow IO context to stop
-        work_guard_.reset();
-
-        // Stop the IO context
-        io_context_.stop();
-
-        running_.store(false);
-    }
-}
-
-void Application::ManagedThread::join() {
-    if (thread_.joinable()) {
-        Logger::trace("Waiting for managed thread '{}' to finish", name_);
-        thread_.join();
-        Logger::trace("Managed thread '{}' finished", name_);
-    }
-}
-
-// Event-Driven Managed Thread Implementation
-
-Application::EventDrivenManagedThread::EventDrivenManagedThread(std::string name, ThreadFunction func)
-    : name_(std::move(name)), func_(std::move(func)) {
-
-    Logger::debug("Creating event-driven managed thread '{}'", name_);
-
-    // Create messaging context
-    messaging_context_ = std::make_unique<ThreadMessagingContext>(name_);
-
-    // Start the thread
-    running_.store(true);
-    thread_ = std::thread([this]() { thread_main(); });
-
-    Logger::debug("Event-driven managed thread '{}' created and started", name_);
-}
-
-Application::EventDrivenManagedThread::~EventDrivenManagedThread() {
-    stop();
-    join();
-    Logger::debug("Event-driven managed thread '{}' destroyed", name_);
-}
-
-void Application::EventDrivenManagedThread::thread_main() {
-    Logger::info("Event-driven managed thread '{}' starting", name_);
-
-    try {
-        // Set up work guard to keep IO context alive
-        work_guard_ = std::make_unique<asio::executor_work_guard<asio::io_context::executor_type>>(io_context_.get_executor());
-
-        // Start background message processing
-        messaging_context_->start_background_processing();
-
-        // Run user function if provided
-        if (func_) {
-            asio::post(io_context_, [this]() {
-                try {
-                    func_(*this);
-                } catch (const std::exception& e) {
-                    Logger::error("Exception in event-driven thread function '{}': {}", name_, e.what());
-                }
-            });
-        }
-
-        // Run IO context (event loop)
-        io_context_.run();
-
-    } catch (const std::exception& e) {
-        Logger::error("Exception in event-driven managed thread '{}': {}", name_, e.what());
-    }
-
-    Logger::info("Event-driven managed thread '{}' stopped", name_);
-}
-
-void Application::EventDrivenManagedThread::post_task(std::function<void()> task) {
-    // Consistent with main application post_task behavior
-    asio::post(io_context_, [task = std::move(task)]() {
-        try {
-            task();
-        } catch (const std::exception& e) {
-            Logger::error("Exception in event-driven managed thread task: {}", e.what());
-        } catch (...) {
-            Logger::error("Unknown exception in event-driven managed thread task");
-        }
-    });
-}
-
-void Application::EventDrivenManagedThread::stop() {
-    if (running_.load()) {
-        Logger::debug("Stopping event-driven managed thread '{}'", name_);
-
-        // Stop messaging context
-        if (messaging_context_) {
-            messaging_context_->stop();
-        }
-
-        // Release work guard to allow IO context to stop
-        work_guard_.reset();
-
-        // Stop the IO context
-        io_context_.stop();
-
-        running_.store(false);
-    }
-}
-
-void Application::EventDrivenManagedThread::join() {
-    if (thread_.joinable()) {
-        Logger::trace("Waiting for event-driven managed thread '{}' to finish", name_);
-        thread_.join();
-        Logger::trace("Event-driven managed thread '{}' finished", name_);
-    }
-}
-
 // Application Thread Management Methods
 
-std::shared_ptr<Application::ManagedThread>
-Application::create_thread(std::string name, ManagedThread::ThreadFunction thread_func) {
-    auto managed_thread = std::make_shared<ManagedThread>(name, std::move(thread_func));
+std::shared_ptr<ManagedThreadBase>
+Application::create_thread(std::string name, std::function<void(ManagedThreadBase&)> thread_func) {
+    // Convert the base interface function to the concrete ManagedThread function
+    Application::ManagedThread::ThreadFunction concrete_func = nullptr;
+    if (thread_func) {
+        concrete_func = [thread_func](Application::ManagedThread& thread) {
+            thread_func(static_cast<ManagedThreadBase&>(thread));
+        };
+    }
+
+    auto managed_thread = std::make_shared<ManagedThread>(name, std::move(concrete_func));
 
     {
         std::lock_guard<std::mutex> lock(managed_threads_mutex_);
         managed_threads_.push_back(managed_thread);
     }
 
-    Logger::info("Created managed thread: {}", name);
     return managed_thread;
-}
-
-std::shared_ptr<Application::ManagedThread>
-Application::create_worker_thread(std::string name) {
-    // Convenience method - equivalent to create_thread with empty function
-    return create_thread(std::move(name), [](asio::io_context& io_ctx) {
-        // Default worker thread just runs the event loop
-        // Tasks can be posted to it using post_task()
-    });
-}
-
-std::shared_ptr<Application::EventDrivenManagedThread>
-Application::create_event_driven_thread(std::string name) {
-    Logger::debug("Creating event-driven thread '{}'", name);
-
-    auto thread = std::make_shared<EventDrivenManagedThread>(std::move(name));
-
-    // Store reference to manage lifecycle (optional - or manage separately)
-    // For now, caller manages the thread lifecycle
-
-    Logger::info("Event-driven thread '{}' created successfully", thread->name());
-    return thread;
 }
 
 std::size_t Application::managed_thread_count() const {
@@ -1171,28 +1024,23 @@ std::size_t Application::managed_thread_count() const {
 void Application::stop_all_managed_threads() {
     std::lock_guard<std::mutex> lock(managed_threads_mutex_);
 
-    Logger::debug("Stopping {} managed threads", managed_threads_.size());
-
+    // Request cooperative stop using jthread's stop token
     for (auto& thread : managed_threads_) {
         if (thread) {
-            thread->stop();
+            thread->request_stop();
         }
     }
+
+    // jthread destructors will automatically join when managed_threads_ is cleared
 }
 
-void Application::join_all_managed_threads() {
+bool Application::any_managed_thread_stop_requested() const {
     std::lock_guard<std::mutex> lock(managed_threads_mutex_);
 
-    Logger::debug("Waiting for {} managed threads to finish", managed_threads_.size());
-
-    for (auto& thread : managed_threads_) {
-        if (thread) {
-            thread->join();
-        }
-    }
-
-    managed_threads_.clear();
-    Logger::debug("All managed threads finished and cleaned up");
+    return std::any_of(managed_threads_.begin(), managed_threads_.end(),
+                      [](const auto& thread) {
+                          return thread && thread->get_stop_token().stop_requested();
+                      });
 }
 
 Application::ManagedThread* Application::get_managed_thread(const std::string& name) const {
@@ -1528,5 +1376,167 @@ void Application::setup_unix_signal_handlers() {
     }
 }
 #endif
+
+// ============================================================================
+// ThreadedComponent Implementation
+// ============================================================================
+
+ThreadedComponent::ThreadedComponent(std::string name)
+    : name_(std::move(name)) {
+    Logger::debug("ThreadedComponent '{}' created", name_);
+}
+
+ThreadedComponent::~ThreadedComponent() {
+    if (running_.load()) {
+        Logger::warn("ThreadedComponent '{}' destroyed while running - forcing stop", name_);
+        stop();
+    }
+    Logger::debug("ThreadedComponent '{}' destroyed", name_);
+}
+
+bool ThreadedComponent::initialize(ThreadFactory& thread_factory) {
+    if (thread_factory_) {
+        Logger::warn("ThreadedComponent '{}' already initialized", name_);
+        return true;
+    }
+
+    // Store the thread factory reference
+    thread_factory_ = &thread_factory;
+
+    try {
+        if (!on_initialize()) {
+            Logger::error("ThreadedComponent '{}' on_initialize() failed", name_);
+            return false;
+        }
+
+        Logger::info("ThreadedComponent '{}' initialized successfully", name_);
+        return true;
+
+    } catch (const std::exception& e) {
+        Logger::error("Exception during ThreadedComponent '{}' initialization: {}", name_, e.what());
+        return false;
+    }
+}
+
+bool ThreadedComponent::start() {
+    if (!thread_factory_) {
+        Logger::error("ThreadedComponent '{}' not initialized - call initialize() first", name_);
+        return false;
+    }
+
+    if (running_.load()) {
+        Logger::warn("ThreadedComponent '{}' already running", name_);
+        return true;
+    }
+
+    try {
+        Logger::info("Starting ThreadedComponent '{}'", name_);
+
+        // Create managed thread with our thread main function
+        managed_thread_ = thread_factory_->create_thread(name_,
+            [this](ManagedThreadBase& thread) {
+                auto concrete_thread = static_cast<Application::ManagedThread*>(&thread);
+                thread_main(*concrete_thread);
+            });
+
+        if (!managed_thread_) {
+            Logger::error("Failed to create managed thread for ThreadedComponent '{}'", name_);
+            return false;
+        }
+
+        running_.store(true);
+        Logger::info("ThreadedComponent '{}' started successfully", name_);
+        return true;
+
+    } catch (const std::exception& e) {
+        Logger::error("Exception starting ThreadedComponent '{}': {}", name_, e.what());
+        return false;
+    }
+}
+
+bool ThreadedComponent::stop() {
+    if (!running_.load()) {
+        return true; // Already stopped
+    }
+
+    Logger::info("Stopping ThreadedComponent '{}'", name_);
+
+    try {
+        // Cancel all timers
+        for (auto& [timer_id, timer] : timers_) {
+            timer->cancel();
+        }
+        timers_.clear();
+
+        // Request thread stop
+        if (managed_thread_) {
+            managed_thread_->request_stop();
+        }
+
+        running_.store(false);
+
+        // Reset managed thread (jthread destructor will join automatically)
+        managed_thread_.reset();
+
+        Logger::info("ThreadedComponent '{}' stopped successfully", name_);
+        return true;
+
+    } catch (const std::exception& e) {
+        Logger::error("Exception stopping ThreadedComponent '{}': {}", name_, e.what());
+        running_.store(false);
+        return false;
+    }
+}
+
+void ThreadedComponent::thread_main(Application::ManagedThread& thread) {
+    Logger::info("ThreadedComponent '{}' thread starting", name_);
+
+    try {
+        // Apply any pending message subscriptions
+        apply_pending_subscriptions();
+
+        // Register a stop callback using a shared pointer for proper lifetime management
+        auto stop_callback = std::make_shared<std::stop_callback<std::function<void()>>>(
+            thread.get_stop_token(), [this]() {
+                // This runs when stop is requested
+                try {
+                    on_stop();
+                } catch (const std::exception& e) {
+                    Logger::error("Exception in ThreadedComponent '{}' on_stop(): {}", name_, e.what());
+                }
+                Logger::info("ThreadedComponent '{}' thread stopped", name_);
+            }
+        );
+
+        // Call user startup logic
+        if (!on_start()) {
+            Logger::error("ThreadedComponent '{}' on_start() failed", name_);
+            return;
+        }
+
+        Logger::debug("ThreadedComponent '{}' thread main setup complete", name_);
+
+        // Keep the stop callback alive by capturing it in a task
+        // This ensures the callback stays registered for the lifetime of the thread
+        thread.post_task([stop_callback]() {
+            // Just hold onto the callback - it will be called when stop is requested
+            // The callback will be destroyed when the thread stops
+        });
+
+    } catch (const std::exception& e) {
+        Logger::error("Exception in ThreadedComponent '{}' thread: {}", name_, e.what());
+    }
+}
+
+void ThreadedComponent::apply_pending_subscriptions() {
+    for (auto& subscription : pending_subscriptions_) {
+        try {
+            subscription();
+        } catch (const std::exception& e) {
+            Logger::error("Exception applying pending subscription for '{}': {}", name_, e.what());
+        }
+    }
+    pending_subscriptions_.clear();
+}
 
 } // namespace base

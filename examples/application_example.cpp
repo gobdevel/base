@@ -144,7 +144,9 @@ public:
 
         // Create worker threads
         for (int i = 0; i < 3; ++i) {
-            auto worker = app.create_worker_thread(fmt::format("Worker-{}", i + 1));
+            auto worker = app.create_thread(fmt::format("Worker-{}", i + 1), [](ManagedThreadBase& thread) {
+                // Simple worker thread that just runs the event loop
+            });
             workers_.push_back(worker);
 
             // Schedule work on each thread
@@ -180,9 +182,12 @@ private:
         if (worker_id < workers_.size()) {
             auto& worker = workers_[worker_id];
 
+            // Cast to Application::ManagedThread to access task posting methods
+            auto* managed_thread = static_cast<Application::ManagedThread*>(worker.get());
+
             // Schedule periodic work
             for (int task = 0; task < 5; ++task) {
-                worker->post_task([worker_id, task]() {
+                managed_thread->post_task([worker_id, task]() {
                     std::this_thread::sleep_for(std::chrono::milliseconds(100 + (task * 50)));
                     Logger::debug("Worker-{} completed task {}", worker_id + 1, task + 1);
                 });
@@ -190,7 +195,7 @@ private:
         }
     }
 
-    std::vector<std::shared_ptr<Application::ManagedThread>> workers_;
+    std::vector<std::shared_ptr<ManagedThreadBase>> workers_;
 };
 
 /**
@@ -325,15 +330,18 @@ private:
         Logger::info("Setting up inter-thread messaging...");
 
         // Create event-driven thread for message processing
-        message_processor_ = create_event_driven_thread("MessageProcessor");
+        message_processor_ = create_thread("MessageProcessor");
+
+        // Cast to Application::ManagedThread to access messaging methods
+        auto* managed_thread = static_cast<Application::ManagedThread*>(message_processor_.get());
 
         // Subscribe to different message types
-        message_processor_->subscribe_to_messages<std::string>([](const Message<std::string>& msg) {
-            Logger::info("Message processor received string: '{}'", msg.data());
+        managed_thread->subscribe_to_messages<std::string>([](const std::string& msg) {
+            Logger::info("Message processor received string: '{}'", msg);
         });
 
-        message_processor_->subscribe_to_messages<int>([](const Message<int>& msg) {
-            Logger::info("Message processor received int: {}", msg.data());
+        managed_thread->subscribe_to_messages<int>([](const int& msg) {
+            Logger::info("Message processor received int: {}", msg);
         });
 
         // Send messages from main thread
@@ -396,7 +404,7 @@ private:
     }
 
     // Store message processor thread to keep it alive
-    std::shared_ptr<Application::EventDrivenManagedThread> message_processor_;
+    std::shared_ptr<ManagedThreadBase> message_processor_;
 };
 
 int main(int argc, char* argv[]) {

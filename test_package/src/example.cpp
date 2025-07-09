@@ -173,9 +173,9 @@ protected:
         auto& metrics = MetricsCollector::instance();
 
         // Create specialized worker threads for different task types
-        auto status_monitor = create_event_driven_thread("status-monitor");
-        auto metrics_processor = create_event_driven_thread("metrics-processor");
-        auto task_executor = create_event_driven_thread("task-executor");
+        auto status_monitor = create_thread("status-monitor");
+        auto metrics_processor = create_thread("metrics-processor");
+        auto task_executor = create_thread("task-executor");
 
         // Setup sophisticated message handlers with different behaviors
         setup_status_monitoring(status_monitor);
@@ -282,7 +282,7 @@ cli_welcome_message = "Welcome to Base Framework Test Package CLI!"
         Logger::info("  - Real-time configuration and health data access");
     }
 
-    void setup_status_monitoring(std::shared_ptr<EventDrivenManagedThread> thread) {
+    void setup_status_monitoring(std::shared_ptr<Application::ManagedThread> thread) {
         thread->subscribe_to_messages<StatusMessage>(
             [this](const Message<StatusMessage>& msg) {
                 const auto& data = msg.data();
@@ -300,7 +300,7 @@ cli_welcome_message = "Welcome to Base Framework Test Package CLI!"
             });
     }
 
-    void setup_metrics_processing(std::shared_ptr<EventDrivenManagedThread> thread) {
+    void setup_metrics_processing(std::shared_ptr<Application::ManagedThread> thread) {
         thread->subscribe_to_messages<MetricUpdate>(
             [this](const Message<MetricUpdate>& msg) {
                 const auto& data = msg.data();
@@ -312,7 +312,7 @@ cli_welcome_message = "Welcome to Base Framework Test Package CLI!"
             });
     }
 
-    void setup_task_execution(std::shared_ptr<EventDrivenManagedThread> thread) {
+    void setup_task_execution(std::shared_ptr<Application::ManagedThread> thread) {
         thread->subscribe_to_messages<TaskRequest>(
             [this](const Message<TaskRequest>& msg) {
                 const auto& data = msg.data();

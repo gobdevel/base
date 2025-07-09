@@ -59,7 +59,6 @@ public:
         ApplicationConfig config;
         config.name = "benchmark_test_app";
         config.worker_threads = 1;
-        config.use_dedicated_io_thread = false;
         config.enable_health_check = false;
         config.parse_command_line = false;
         config.daemonize = false;
@@ -119,7 +118,6 @@ public:
         ApplicationConfig config;
         config.name = "multithread_benchmark_app";
         config.worker_threads = num_threads;
-        config.use_dedicated_io_thread = true;
         config.enable_health_check = false;
         config.parse_command_line = false;
         config.daemonize = false;
@@ -529,9 +527,11 @@ static void BM_ApplicationMemoryUsage(benchmark::State& state) {
         app->start_app();
 
         // Create additional managed threads
-        std::vector<std::shared_ptr<Application::ManagedThread>> threads;
+        std::vector<std::shared_ptr<ManagedThreadBase>> threads;
         for (int i = 0; i < 5; ++i) {
-            threads.push_back(app->create_worker_thread("worker_" + std::to_string(i)));
+            threads.push_back(app->create_thread("worker_" + std::to_string(i), [](ManagedThreadBase& thread) {
+                // Simple worker thread that just runs the event loop
+            }));
         }
 
         // Schedule some recurring tasks
@@ -549,8 +549,8 @@ static void BM_ApplicationMemoryUsage(benchmark::State& state) {
         }
 
         for (auto& thread : threads) {
-            thread->stop();
-            thread->join();
+            thread->request_stop();
+            // No manual join needed - std::jthread auto-joins on destruction
         }
 
         app->stop_app();

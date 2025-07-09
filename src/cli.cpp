@@ -9,7 +9,7 @@
 #include "cli.h"
 #include "application.h"
 #include "config.h"
-#include "messaging.h"
+#include "thread_messaging.h"
 
 #include <asio/ip/tcp.hpp>
 #include <asio/read_until.hpp>
@@ -477,7 +477,6 @@ CLIResult CLI::cmd_status(const CLIContext& context) {
     oss << "Running: " << (context.app->is_running() ? "Yes" : "No") << "\n";
     oss << "Worker Threads: " << config.worker_threads << "\n";
     oss << "Managed Threads: " << context.app->managed_thread_count() << "\n";
-    oss << "Dedicated IO Thread: " << (config.use_dedicated_io_thread ? "Yes" : "No") << "\n";
 
     return CLIResult::ok(oss.str());
 }
@@ -566,7 +565,7 @@ CLIResult CLI::cmd_messaging(const CLIContext& context) {
     oss << "===================\n";
 
     try {
-        auto& bus = MessagingBus::instance();
+        auto& bus = InterThreadMessagingBus::instance();
         oss << "Message Bus: Available\n";
 
         if (detailed) {
